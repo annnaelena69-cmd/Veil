@@ -284,15 +284,14 @@ class MainActivity : Activity() {
         if (!::web.isInitialized || !::status.isInitialized) return
         val photo = runCatching {
             val raw = prefs.getString("home_photo", null) ?: return@runCatching null
-            contentResolver.openInputStream(Uri.parse(raw))?.use { input ->
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                input.mark(1024 * 1024)
-                BitmapFactory.decodeStream(input, null, bounds)
-                try { input.reset() } catch (_: Exception) { return@use null }
-                val maxSide = 1440
-                var sample = 1
-                while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
-                val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+            val uri = Uri.parse(raw)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            val maxSide = 1440
+            var sample = 1
+            while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+            contentResolver.openInputStream(uri)?.use { input ->
                 val bitmap = BitmapFactory.decodeStream(input, null, options) ?: return@use null
                 val out = java.io.ByteArrayOutputStream()
                 bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 76, out)
