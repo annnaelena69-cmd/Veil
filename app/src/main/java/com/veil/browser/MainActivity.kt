@@ -298,16 +298,6 @@ class MainActivity : Activity() {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) settings.safeBrowsingEnabled = true
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, !prefs.getBoolean("block_third_party_cookies", true))
-            addJavascriptInterface(object {
-                @JavascriptInterface
-                fun search(query: String) {
-                    runOnUiThread { navigate(query) }
-                }
-                @JavascriptInterface
-                fun openSettings() {
-                    runOnUiThread { settings() }
-                }
-            }, "VEIL")
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) {
                     runOnUiThread { handleWebPermissionRequest(request) }
@@ -366,13 +356,20 @@ class MainActivity : Activity() {
                     }
                     runCatching { webHost.removeView(crashedView) }
                     runCatching { crashedView.stopLoading(); crashedView.destroy() }
-                    val replacement = createBrowserWebView()
-                    tabs[index] = replacement
-                    webHost.addView(replacement, FrameLayout.LayoutParams(-1, -1))
-                    if (index == activeTab) {
-                        web = replacement
-                        home()
-                        Toast.makeText(this@MainActivity, "VEIL recovered a browser page after WebView stopped.", Toast.LENGTH_LONG).show()
+                    runOnUiThread {
+                        runCatching {
+                            val replacement = createBrowserWebView()
+                            tabs[index] = replacement
+                            webHost.removeAllViews()
+                            webHost.addView(replacement, FrameLayout.LayoutParams(-1, -1))
+                            if (index == activeTab) {
+                                web = replacement
+                                home()
+                                Toast.makeText(this@MainActivity, "VEIL recovered after the page process stopped.", Toast.LENGTH_LONG).show()
+                            }
+                        }.onFailure {
+                            Toast.makeText(this@MainActivity, "VEIL could not restore this page. Please reopen the tab.", Toast.LENGTH_LONG).show()
+                        }
                     }
                     return true
                 }
@@ -394,7 +391,6 @@ class MainActivity : Activity() {
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    if (view === web && url?.startsWith("https://veil.local/") == true) installHomeBridge(view)
                     if (url != null && url.startsWith("http")) recordHistory(url)
                     if (view === web && url != null && ::address.isInitialized) address.setText(url)
                     if (view === web && url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
@@ -482,24 +478,13 @@ class MainActivity : Activity() {
           var field=document.getElementById('q');
           var value=field.value.trim();
           if(!value)return;
-          if(window.VEIL && window.VEIL.search){window.VEIL.search(value);}
+          window.location.href='veilsearch://search?q='+encodeURIComponent(value);
         }
         </script>
         </body></html>"""
-        installHomeBridge(web)
         web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null)
         address.setText("")
         address.hint = tr("Search or enter address", "Cari atau masukkan alamat")
-    }
-
-    private fun installHomeBridge(target: WebView) {
-        target.removeJavascriptInterface("VEIL")
-        target.addJavascriptInterface(object {
-            @JavascriptInterface
-            fun search(query: String) {
-                runOnUiThread { navigate(query) }
-            }
-        }, "VEIL")
     }
 
     private fun navigate(raw: String) {
