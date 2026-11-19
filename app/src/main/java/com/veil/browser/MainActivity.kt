@@ -49,7 +49,7 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun label(s: String, size: Float = 14f) = TextView(this).apply {
-        text = s; textSize = size; setTextColor(foreground); gravity = Gravity.CENTER
+        text = s; textSize = size; setTextColor(this@MainActivity.foreground); gravity = Gravity.CENTER
         setPadding(dp(8), dp(8), dp(8), dp(8))
     }
     private fun action(s: String, callback: () -> Unit) = label(s).apply {
@@ -71,7 +71,7 @@ class MainActivity : Activity() {
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         header.addView(label("VEIL", 20f))
         address = EditText(this).apply {
-            singleLine = true; textSize = 14f; setTextColor(foreground); setHintTextColor(Color.GRAY)
+            isSingleLine = true; textSize = 14f; setTextColor(this@MainActivity.foreground); setHintTextColor(Color.GRAY)
             hint = "Search or enter website"; setPadding(dp(12), dp(8), dp(12), dp(8))
             setBackgroundColor(panel); imeOptions = EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_GO) { navigate(text.toString()); true } else false }
