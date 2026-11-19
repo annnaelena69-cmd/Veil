@@ -24,11 +24,13 @@ import java.net.URLEncoder
  */
 class PrivateActivity : Activity() {
     private var browser: WebView? = null
+    companion object { @Volatile private var privateWebViewProcessConfigured = false }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            WebView.setDataDirectorySuffix("veil_private")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !privateWebViewProcessConfigured) {
+            runCatching { WebView.setDataDirectorySuffix("veil_private") }
+            privateWebViewProcessConfigured = true
         }
 
         val root = LinearLayout(this).apply {
@@ -55,8 +57,12 @@ class PrivateActivity : Activity() {
 
         val view = WebView(this)
         browser = view
+        view.setBackgroundColor(0xFF08090C.toInt())
         view.settings.javaScriptEnabled = true
         view.settings.domStorageEnabled = true
+        view.settings.loadsImagesAutomatically = true
+        view.settings.javaScriptCanOpenWindowsAutomatically = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) view.settings.safeBrowsingEnabled = true
         view.settings.allowFileAccess = false
         view.settings.allowContentAccess = false
         view.settings.javaScriptCanOpenWindowsAutomatically = false
