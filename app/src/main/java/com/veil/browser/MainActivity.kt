@@ -59,6 +59,19 @@ class MainActivity : Activity() {
     private val tabs = mutableListOf<WebView>()
     private var activeTab = 0
     private lateinit var webHost: FrameLayout
+    private var cachedFilterEngine: FilterEngine? = null
+    private var cachedFilterStamp: Long = -1L
+
+    private fun filterEngine(): FilterEngine {
+        val stamp = prefs.getLong("filters_updated_at", 0L)
+        if (cachedFilterEngine == null || cachedFilterStamp != stamp) {
+            val rules = (prefs.getString("downloaded_filter_rules", "") ?: "").lines().filter { it.isNotBlank() }
+            val legacy = (prefs.getString("downloaded_block_domains", "") ?: "").lines().filter { it.isNotBlank() }.map { "||" + it + "^" }
+            cachedFilterEngine = FilterEngine(rules + legacy)
+            cachedFilterStamp = stamp
+        }
+        return cachedFilterEngine!!
+    }
 
     private val languageCodes = listOf(
         "en","id","ar","bn","bg","ca","zh","zh-TW","hr","cs","da","nl","et","fi","fr","de","el","gu","he","hi",
@@ -165,6 +178,7 @@ class MainActivity : Activity() {
         return WebView(this).apply {
             setBackgroundColor(black)
             settings.javaScriptEnabled = true
+            settings.setGeolocationEnabled(true)
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
             settings.javaScriptCanOpenWindowsAutomatically = false
@@ -194,6 +208,7 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val uri = request?.url ?: return false
+                    if (view === web) applySiteJavaScript(uri.host ?: "")
                     if (uri.scheme == "https" || uri.scheme == "http") { if (view === web) address.setText(uri.toString()); return false }
                     return true
                 }
@@ -202,14 +217,26 @@ class MainActivity : Activity() {
                     val jsBlocked = prefs.getString("site_js_" + host, "default") == "block"
                     if (jsBlocked && request.url.path?.endsWith(".js", true) == true) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by site settings", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     val mode = prefs.getString("block_level", "standard") ?: "standard"
-                    if (blocked(host, mode)) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by VEIL", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+                    val requestUrl = request.url.toString()
+                    val pageUrl = view?.url
+                    val accept = request.requestHeaders["Accept"]
+                    if (filterEngine().shouldBlock(requestUrl, pageUrl, request.isForMainFrame, accept) || blocked(host, mode)) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by VEIL", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     return super.shouldInterceptRequest(view, request)
                 }
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon); if (view === web) url?.let { address.setText(it) }
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url); if (url != null && url.startsWith("http")) recordHistory(url); if (view === web && ::status.isInitialized) status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
+                    super.onPageFinished(view, url)
+                    if (url != null && url.startsWith("http")) recordHistory(url)
+                    if (url != null) {
+                        val css = filterEngine().cosmeticCss(url)
+                        if (css.isNotBlank()) {
+                            val safeCss = css.replace("\\", "\\\\").replace("'", "\\'")
+                            view?.evaluateJavascript("(function(){var s=document.createElement('style');s.textContent='$safeCss{display:none!important}';(document.head||document.documentElement).appendChild(s);})();", null)
+                        }
+                    }
+                    if (view === web && ::status.isInitialized) status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
                 }
             }
         }
@@ -290,6 +317,7 @@ class MainActivity : Activity() {
         Thread {
             val blockedHosts = linkedSetOf<String>()
             val allowedHosts = linkedSetOf<String>()
+            val allRules = linkedSetOf<String>()
             val sources = listOf(
                 "https://easylist.to/easylist/easylist.txt",
                 "https://easylist.to/easylist/easyprivacy.txt"
@@ -305,6 +333,7 @@ class MainActivity : Activity() {
                         connection.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach lineLoop@{ raw ->
                                 val line = raw.trim()
+                                if (line.isNotEmpty()) allRules.add(line)
                                 if (line.isEmpty() || line.startsWith("!") || line.startsWith("[")) return@lineLoop
                                 val exception = line.startsWith("@@||")
                                 val candidate = if (exception) line.removePrefix("@@||") else if (line.startsWith("||")) line.removePrefix("||") else return@lineLoop
@@ -373,6 +402,11 @@ class MainActivity : Activity() {
         val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
         AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
     }
+    private fun applySiteJavaScript(host: String) {
+        if (!::web.isInitialized || host.isBlank()) return
+        web.settings.javaScriptEnabled = prefs.getString("site_js_" + host.lowercase(Locale.ROOT), "default") != "block"
+    }
+
     private fun sitePermissions() {
         val host = runCatching { Uri.parse(web.url ?: "").host ?: "" }.getOrDefault("")
         if (host.isBlank()) { Toast.makeText(this, "Open a website first", Toast.LENGTH_SHORT).show(); return }
@@ -387,7 +421,8 @@ class MainActivity : Activity() {
                 3 -> prefs.edit().putString(geoKey, "allow").apply()
                 4 -> prefs.edit().remove(jsKey).remove(geoKey).apply()
             }
-            Toast.makeText(this, "Site preference saved", Toast.LENGTH_SHORT).show()
+            applySiteJavaScript(host)
+            Toast.makeText(this, "Site preference saved. Reload the page to apply changes.", Toast.LENGTH_SHORT).show()
         }.show()
     }
 
