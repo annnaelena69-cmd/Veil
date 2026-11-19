@@ -49,3 +49,8 @@ Universal packaging does not guarantee that every device ABI or WebView provider
 Open [GitHub Actions](https://github.com/annnaelena69-cmd/Veil/actions), select a successful workflow run, and download the `VEIL-debug-universal` artifact.
 
 VEIL is actively developed. Feature availability is described above; planned work should not be treated as completed functionality.
+
+
+## Language support (v1)
+
+VEIL currently exposes 50 language/locale choices in the app language picker and Android locale configuration. This is a staged rollout, not a claim of complete translation into all 50 languages: the current in-app text catalog is still primarily English with Indonesian translations for selected interface strings. Other selected locales currently fall back to English until their complete UI catalogs are added and tested. Website translation is not part of this setting.
