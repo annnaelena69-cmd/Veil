@@ -1,56 +1,46 @@
 # VEIL Browser
 
-A privacy-focused Android browser built with Kotlin and Android WebView. VEIL is designed around a minimal Obsidian interface, local preferences, and configurable content blocking.
+A privacy-focused Android browser prototype built with Kotlin and Android WebView. VEIL uses a minimal dark interface and keeps browser preferences locally.
 
-## Current status
+## Current implementation
 
-VEIL is an actively developed prototype. It is not yet a production-ready or independently audited privacy browser.
+- WebView-based browser with address/search navigation.
+- Multiple in-app tabs with independent WebView instances, tab switching, and closing.
+- Separate private-browsing activity running in its own Android process with a dedicated WebView data-directory profile on Android 9 and newer. The private profile is cleared when its activity closes. Isolated private mode is unavailable on Android 8 and older.
+- Standard, Strong, and Super hostname-blocking levels.
+- Manual and scheduled downloads of EasyList and EasyPrivacy, with basic domain-rule and exception extraction.
+- Homepage photo selection from device storage and rendering as the local home-page background.
+- Local bookmarks and language selection with 100 locale options.
+- Theme, accent, and search-engine preference controls.
+- No account, login, analytics SDK, or telemetry endpoint is included in the source.
 
-### Available in the current build
-- Dark browser interface with address/search input.
-- App-language picker with 100 locale options.
-- Local bookmarks and browsing-data controls.
-- Homepage image selection from device storage.
-- Configurable Standard, Strong, and Super hostname-blocking levels.
-- EasyList download/update support for a limited subset of network-host rules.
-- Local theme, accent, and search-engine preferences.
-- GitHub Actions workflow for a universal debug APK.
+## Known limitations
 
-## In development
-- Full multi-tab lifecycle and tab switching.
-- Properly isolated private browsing sessions.
-- Complete localization of every app screen across the supported languages.
-- Broader filter-rule parsing, exception handling, cosmetic filtering, and reliable filter updates.
-- Complete application of theme and accent preferences.
-- Compatibility and privacy testing across Android versions and device architectures.
+VEIL is not a finished, audited, or production-ready privacy browser.
 
-## Ad blocking
+### Ad blocking
+The current filter implementation extracts hostname rules and some hostname exceptions from EasyList and EasyPrivacy. It does **not** implement the complete Adblock Plus filter syntax, cosmetic selectors, scriptlets, request-type matching, redirect rules, or all exception semantics. It cannot reliably block first-party ads and is not equivalent to Brave Shields or uBlock Origin. The project does not claim better blocking than Brave.
 
-The current blocker is an early hostname-based implementation. It does not support the complete EasyList/uBlock rule syntax and should not be considered equivalent to Brave Shields or uBlock Origin. First-party ads, cosmetic elements, and script-based trackers may not be blocked. More advanced filtering is a development goal, not a feature claim.
+### Localization
+The app currently offers 100 locale choices, but complete translation of every menu, dialog, and status message into all 100 languages is not implemented. English and Indonesian have partial UI strings; other languages currently fall back to English.
 
-## Privacy
+### Privacy and tabs
+Normal tabs use separate WebView instances but share the normal browser profile and cookies. Private browsing uses a separate WebView data directory on Android 9+ and clears that profile on close. This is not a guarantee of anonymity: websites and network providers can still observe connection data.
 
-- No account or login is required.
-- The source currently includes no analytics SDK or telemetry endpoint.
-- Browser preferences and bookmarks are stored locally.
-- Filter updates retrieve public filter data.
-- Websites visited can still receive connection data and may collect information. VEIL does not make browsing anonymous.
+### Customization and browser features
+Theme and accent choices are stored but are not yet applied consistently throughout the native interface. Site-permission controls, a complete download manager UI, advanced history management, reader mode, and full filter controls remain future work.
 
-## Build
+## Build configuration
 
-The Android project uses:
-- Kotlin
-- Android Gradle Plugin
-- Android WebView
+- Kotlin and Android WebView
 - compileSdk 36 / targetSdk 36 / minSdk 23
 - Java 17
+- ABI splits disabled for a universal debug APK build
 
-ABI splits are disabled to produce a universal APK containing the app's supported native configuration. Actual installation and runtime compatibility depend on the device's Android WebView provider and ABI.
+Universal packaging does not guarantee that every device ABI or WebView provider will work. Real-device testing is required, including Android 16/17 and 32-bit/64-bit devices.
 
-## Downloads
+## Debug APK
 
-Debug builds are published as GitHub Actions artifacts. Open the [Actions page](https://github.com/annnaelena69-cmd/Veil/actions), select a successful run, and download the `VEIL-debug-universal` artifact.
+Open [GitHub Actions](https://github.com/annnaelena69-cmd/Veil/actions), select a successful workflow run, and download the `VEIL-debug-universal` artifact.
 
-## Project status
-
-VEIL is under active development. Features are marked available only when implemented; planned work is listed separately above. Real-device testing is required before any stable release.
+VEIL is actively developed. Feature availability is described above; planned work should not be treated as completed functionality.
