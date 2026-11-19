@@ -47,7 +47,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("veil_local_settings", MODE_PRIVATE)
-        if (prefs.getString("language", null) == null) chooseLanguage(firstRun = true) else buildBrowser()
+        if (prefs.getString("language", null) == null) chooseLanguage(firstRun = true) else { applyAppLocale(); buildBrowser() }
         refreshFiltersIfDue()
     }
 
@@ -59,15 +59,37 @@ class MainActivity : Activity() {
     private fun action(s: String, callback: () -> Unit) = label(s).apply {
         setBackgroundColor(panel); setOnClickListener { callback() }
     }
+    private fun appLocale(): Locale = Locale.forLanguageTag(prefs.getString("language", "en") ?: "en")
+
+    private fun tr(en: String, id: String): String =
+        if (appLocale().language == "id") id else en
+
+    @Suppress("DEPRECATION")
+    private fun applyAppLocale() {
+        val locale = appLocale()
+        Locale.setDefault(locale)
+        val config = resources.configuration
+        config.setLocale(locale)
+        resources.updateConfiguration(config, resources.displayMetrics)
+    }
+
     private fun chooseLanguage(firstRun: Boolean = false) {
-        val locales = languageCodes.mapNotNull { code -> runCatching { Locale.forLanguageTag(code) }.getOrNull() }
-        val names = locales.map { it.getDisplayName(it).replaceFirstChar { c -> c.uppercase(it) } }.distinct()
-        AlertDialog.Builder(this).setTitle(if (firstRun) "VEIL • Choose language" else "Language")
-            .setItems(names.toTypedArray()) { _, index ->
+        val locales = languageCodes.map { Locale.forLanguageTag(it) }
+        val names = locales.map { locale ->
+            locale.getDisplayName(locale).replaceFirstChar { ch -> ch.uppercase(locale) }
+        }
+        val current = prefs.getString("language", "en") ?: "en"
+        val selected = locales.indexOfFirst { it.toLanguageTag().equals(current, true) }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(if (firstRun) "VEIL • Choose app language" else tr("App language", "Bahasa aplikasi"))
+            .setSingleChoiceItems(names.toTypedArray(), selected) { dialog, index ->
                 prefs.edit().putString("language", locales[index].toLanguageTag()).apply()
-                if (firstRun || !::root.isInitialized) buildBrowser()
-                else Toast.makeText(this, "Language saved. Some screens may need a restart.", Toast.LENGTH_SHORT).show()
-            }.setCancelable(!firstRun).show()
+                dialog.dismiss()
+                applyAppLocale()
+                recreate()
+            }
+            .setNegativeButton(if (firstRun) null else tr("Cancel", "Batal"), null)
+            .setCancelable(!firstRun).show()
     }
 
     private fun buildBrowser() {
@@ -76,7 +98,7 @@ class MainActivity : Activity() {
         header.addView(label("VEIL", 20f))
         address = EditText(this).apply {
             isSingleLine = true; textSize = 14f; setTextColor(this@MainActivity.foreground); setHintTextColor(Color.GRAY)
-            hint = "Search or enter website"; setPadding(dp(12), dp(8), dp(12), dp(8))
+            hint = tr("Search or enter website", "Cari atau masukkan situs"); setPadding(dp(12), dp(8), dp(12), dp(8))
             setBackgroundColor(panel); imeOptions = EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_GO) { navigate(text.toString()); true } else false }
         }
@@ -172,8 +194,16 @@ class MainActivity : Activity() {
     }
 
     private fun settings() {
-        val items = arrayOf("AdBlock: Standard / Strong / Super Block","Update AdBlock filter lists now","Choose homepage photo from Gallery","Theme: Obsidian / Midnight / Light","Accent color","Search engine","Language (100 options)","Clear browsing data","About & privacy")
-        AlertDialog.Builder(this).setTitle("VEIL Settings").setItems(items) { _, which ->
+        val items = arrayOf(
+            tr("AdBlock: Standard / Strong / Super Block","AdBlock: Standar / Kuat / Super Block"),
+            tr("Update AdBlock filter lists now","Perbarui daftar filter AdBlock"),
+            tr("Choose homepage photo from Gallery","Pilih foto halaman utama dari Galeri"),
+            tr("Theme: Obsidian / Midnight / Light","Tema: Obsidian / Gelap / Terang"),
+            tr("Accent color","Warna aksen"), tr("Search engine","Mesin pencari"),
+            tr("App language (100 languages)","Bahasa aplikasi (100 bahasa)"),
+            tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
+        )
+        AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
             when (which) {
                 0 -> chooseBlock()
                 1 -> refreshFilters(force = true)
@@ -224,7 +254,7 @@ class MainActivity : Activity() {
     private fun chooseBlock() {
         val names = arrayOf("Standard", "Strong", "Super Block • Most aggressive")
         val keys = arrayOf("standard", "strong", "super")
-        AlertDialog.Builder(this).setTitle("AdBlock level").setSingleChoiceItems(names, keys.indexOf(prefs.getString("block_level", "standard"))) { dialog, index ->
+        AlertDialog.Builder(this).setTitle(tr("AdBlock level","Tingkat AdBlock")).setSingleChoiceItems(names, keys.indexOf(prefs.getString("block_level", "standard"))) { dialog, index ->
             prefs.edit().putString("block_level", keys[index]).apply()
             dialog.dismiss()
             status.text = "AdBlock: " + names[index]
@@ -247,19 +277,19 @@ class MainActivity : Activity() {
     }
     private fun chooseTheme() {
         val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light")
-        AlertDialog.Builder(this).setTitle("Theme").setItems(names) { _, i ->
+        AlertDialog.Builder(this).setTitle(tr("Theme","Tema")).setItems(names) { _, i ->
             prefs.edit().putString("theme",names[i]).apply()
             Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show()
         }.show()
     }
     private fun chooseAccent() {
         val names = arrayOf("Silver","Ice Blue","Emerald","Amber","Rose")
-        AlertDialog.Builder(this).setTitle("Accent").setItems(names) { _, i -> prefs.edit().putInt("accent",i).apply(); Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show() }.show()
+        AlertDialog.Builder(this).setTitle(tr("Accent","Warna aksen")).setItems(names) { _, i -> prefs.edit().putInt("accent",i).apply(); Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show() }.show()
     }
     private fun chooseSearch() {
         val names = arrayOf("DuckDuckGo","Google","Bing","Brave Search")
         val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
-        AlertDialog.Builder(this).setTitle("Search engine").setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
+        AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
     }
     private fun saveBookmark() {
         val url = web.url ?: return
