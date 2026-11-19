@@ -2,12 +2,14 @@ package com.veil.browser
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.DownloadManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.os.Build
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
@@ -32,9 +34,26 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var address: EditText
     private lateinit var status: TextView
-    private val black = Color.rgb(4, 4, 5)
-    private val panel = Color.rgb(19, 19, 22)
-    private val foreground = Color.rgb(240, 240, 244)
+    private val black: Int get() = when (prefs.getString("theme", "Obsidian Full Black")) {
+        "Midnight Dark" -> Color.rgb(12, 16, 25)
+        "Minimal Grey" -> Color.rgb(28, 28, 31)
+        "Light" -> Color.rgb(245, 245, 248)
+        else -> Color.rgb(4, 4, 5)
+    }
+    private val panel: Int get() = when (prefs.getString("theme", "Obsidian Full Black")) {
+        "Midnight Dark" -> Color.rgb(24, 31, 45)
+        "Minimal Grey" -> Color.rgb(43, 43, 47)
+        "Light" -> Color.rgb(225, 225, 232)
+        else -> Color.rgb(19, 19, 22)
+    }
+    private val foreground: Int get() = if (prefs.getString("theme", "Obsidian Full Black") == "Light") Color.rgb(20, 20, 24) else Color.rgb(240, 240, 244)
+    private val accentColor: Int get() = when (prefs.getInt("accent", 0)) {
+        1 -> Color.rgb(95, 190, 255)
+        2 -> Color.rgb(50, 205, 130)
+        3 -> Color.rgb(235, 170, 65)
+        4 -> Color.rgb(230, 115, 155)
+        else -> Color.rgb(190, 195, 205)
+    }
     private val tabs = mutableListOf<WebView>()
     private var activeTab = 0
     private lateinit var webHost: FrameLayout
@@ -60,7 +79,7 @@ class MainActivity : Activity() {
         setPadding(dp(8), dp(8), dp(8), dp(8))
     }
     private fun action(s: String, callback: () -> Unit) = label(s).apply {
-        setBackgroundColor(panel); setOnClickListener { callback() }
+        setBackgroundColor(panel); setTextColor(accentColor); setOnClickListener { callback() }
     }
     private fun appLocale(): Locale = Locale.forLanguageTag(prefs.getString("language", "en") ?: "en")
 
@@ -152,6 +171,17 @@ class MainActivity : Activity() {
             settings.allowContentAccess = false
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             webChromeClient = WebChromeClient()
+            setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+                runCatching {
+                    val request = DownloadManager.Request(Uri.parse(url))
+                        .setMimeType(mimeType)
+                        .addRequestHeader("User-Agent", userAgent)
+                        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType))
+                    (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                    Toast.makeText(this@MainActivity, "Download started", Toast.LENGTH_SHORT).show()
+                }.onFailure { Toast.makeText(this@MainActivity, "Could not start download", Toast.LENGTH_SHORT).show() }
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val uri = request?.url ?: return false
@@ -168,7 +198,7 @@ class MainActivity : Activity() {
                     super.onPageStarted(view, url, favicon); if (view === web) url?.let { address.setText(it) }
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url); if (view === web && ::status.isInitialized) status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
+                    super.onPageFinished(view, url); if (url != null && url.startsWith("http")) recordHistory(url); if (view === web && ::status.isInitialized) status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
                 }
             }
         }
@@ -220,7 +250,7 @@ class MainActivity : Activity() {
             tr("Theme: Obsidian / Midnight / Light","Tema: Obsidian / Gelap / Terang"),
             tr("Accent color","Warna aksen"), tr("Search engine","Mesin pencari"),
             tr("App language (100 languages)","Bahasa aplikasi (100 bahasa)"),
-            tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
+            tr("Browsing history","Riwayat penjelajahan"), tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
         )
         AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
             when (which) {
@@ -231,8 +261,9 @@ class MainActivity : Activity() {
                 4 -> chooseAccent()
                 5 -> chooseSearch()
                 6 -> chooseLanguage()
-                7 -> clearData()
-                8 -> AlertDialog.Builder(this).setTitle(tr("VEIL privacy","Privasi VEIL")).setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
+                7 -> showHistory()
+                8 -> clearData()
+                9 -> AlertDialog.Builder(this).setTitle(tr("VEIL privacy","Privasi VEIL")).setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
             }
         }.show()
     }
@@ -317,7 +348,8 @@ class MainActivity : Activity() {
         val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light")
         AlertDialog.Builder(this).setTitle(tr("Theme","Tema")).setItems(names) { _, i ->
             prefs.edit().putString("theme",names[i]).apply()
-            Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show()
+            buildBrowser()
+            Toast.makeText(this,names[i]+" applied",Toast.LENGTH_SHORT).show()
         }.show()
     }
     private fun chooseAccent() {
@@ -329,6 +361,21 @@ class MainActivity : Activity() {
         val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
         AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
     }
+    private fun recordHistory(url: String) {
+        val old = prefs.getString("history", "") ?: ""
+        val updated = (listOf(url) + old.lines().filter { it.isNotBlank() && it != url }).take(500)
+        prefs.edit().putString("history", updated.joinToString("\n")).apply()
+    }
+
+    private fun showHistory() {
+        val history = (prefs.getString("history", "") ?: "").lines().filter { it.startsWith("http") }
+        if (history.isEmpty()) Toast.makeText(this, "No browsing history", Toast.LENGTH_SHORT).show()
+        else AlertDialog.Builder(this).setTitle(tr("Browsing history", "Riwayat penjelajahan"))
+            .setItems(history.toTypedArray()) { _, index -> navigate(history[index]) }
+            .setNeutralButton(tr("Clear history", "Hapus riwayat")) { _, _ -> prefs.edit().remove("history").apply() }
+            .setNegativeButton(tr("Close", "Tutup"), null).show()
+    }
+
     private fun saveBookmark() {
         val url = web.url ?: return
         val old = prefs.getString("bookmarks","") ?: ""
@@ -393,7 +440,7 @@ class MainActivity : Activity() {
     private fun clearData() {
         web.clearHistory(); web.clearCache(true); web.clearFormData()
         CookieManager.getInstance().removeAllCookies(null); CookieManager.getInstance().flush()
-        prefs.edit().remove("bookmarks").apply()
+        prefs.edit().remove("bookmarks").remove("history").apply()
         Toast.makeText(this,"Local browser data cleared",Toast.LENGTH_SHORT).show()
     }
     @Suppress("DEPRECATION")
