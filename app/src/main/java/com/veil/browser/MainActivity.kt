@@ -349,6 +349,7 @@ class MainActivity : Activity() {
                 prefs.edit()
                     .putString("downloaded_block_domains", blockedHosts.joinToString("\n"))
                     .putString("allowed_filter_domains", allowedHosts.joinToString("\n"))
+                    .putString("downloaded_filter_rules", allRules.joinToString("\n"))
                     .putLong("filters_updated_at", System.currentTimeMillis())
                     .apply()
                 runOnUiThread {
