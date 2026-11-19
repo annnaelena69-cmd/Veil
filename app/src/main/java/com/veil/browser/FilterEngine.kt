@@ -9,7 +9,7 @@ class FilterEngine(lines: Collection<String>) {
         val regex: Regex, val exception: Boolean,
         val include: Set<String>, val exclude: Set<String>,
         val types: Set<String>, val notTypes: Set<String>,
-        val thirdParty: Boolean?, val pageOptions: Set<String>, val generic: Boolean
+        val thirdParty: Boolean?, val pageOptions: Set<String>, val generic: Boolean, val important: Boolean
     )
     private data class CosmeticRule(val include: Set<String>, val exclude: Set<String>, val selector: String, val generic: Boolean)
 
@@ -57,14 +57,23 @@ class FilterEngine(lines: Collection<String>) {
         if (pageHost.isNotEmpty() && pageException(pageHost, "document")) return false
         val third = pageHost.isNotEmpty() && !(matches(host, pageHost) || matches(pageHost, host))
         val type = requestType(url, accept, mainFrame)
-        val matched = networkRules.filter { r ->
-            applies(pageHost, r.include, r.exclude) &&
-                (r.types.isEmpty() || type in r.types) && type !in r.notTypes &&
-                (r.thirdParty == null || r.thirdParty == third) && r.regex.containsMatchIn(url)
-        }
-        if (matched.any { it.exception }) return false
         val noGeneric = pageHost.isNotEmpty() && pageException(pageHost, "genericblock")
-        return matched.any { !it.exception && !(noGeneric && it.generic) }
+        var hasException = false
+        var hasBlock = false
+        var hasImportantBlock = false
+        for (rule in networkRules) {
+            if (!applies(pageHost, rule.include, rule.exclude)) continue
+            if (rule.types.isNotEmpty() && type !in rule.types) continue
+            if (type in rule.notTypes) continue
+            if (rule.thirdParty != null && rule.thirdParty != third) continue
+            if (!rule.regex.containsMatchIn(url)) continue
+            if (rule.exception) hasException = true
+            else if (rule.important) hasImportantBlock = true
+            else if (!(noGeneric && rule.generic)) hasBlock = true
+            if (hasImportantBlock) return true
+        }
+        if (hasException) return false
+        return hasBlock
     }
 
     fun cosmeticCss(pageUrl: String?): String {
@@ -96,12 +105,14 @@ class FilterEngine(lines: Collection<String>) {
         val types = mutableSetOf<String>(); val notTypes = mutableSetOf<String>()
         val pageOpts = mutableSetOf<String>()
         var third: Boolean? = null
+        var important = false
         for (o in opts) {
             when {
                 o.startsWith("domain=") -> { val d = domains(o.removePrefix("domain=").split('|')); inc.addAll(d.first); exc.addAll(d.second) }
                 o == "third-party" -> third = true
                 o == "~third-party" -> third = false
                 o == "match-case" -> Unit
+                o == "important" && !exception -> important = true
                 exception && o in setOf("document", "elemhide", "generichide", "genericblock") -> pageOpts.add(o)
                 o.startsWith("~") && o.drop(1) in resourceTypes -> notTypes.add(o.drop(1))
                 o in resourceTypes -> types.add(o)
@@ -114,7 +125,7 @@ class FilterEngine(lines: Collection<String>) {
         val regex = toRegex(pattern) ?: return null
         return runCatching {
             NetworkRule(Regex(regex, if (matchCase) emptySet() else setOf(RegexOption.IGNORE_CASE)),
-                exception, inc, exc, types, notTypes, third, pageOpts, inc.isEmpty() && exc.isEmpty())
+                exception, inc, exc, types, notTypes, third, pageOpts, inc.isEmpty() && exc.isEmpty(), important)
         }.getOrNull()
     }
 
