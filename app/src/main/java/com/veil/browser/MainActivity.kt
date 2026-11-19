@@ -381,7 +381,7 @@ class MainActivity : Activity() {
                     super.onPageStarted(view, url, favicon)
                     if (view === web) url?.let { address.setText(it) }
                     if (url != null && url.startsWith("http")) {
-                        val scriptlets = (cachedScriptletEngine ?: ScriptletEngine(emptyList())).scriptFor(url)
+                        val scriptlets = filterEngine().let { cachedScriptletEngine?.scriptFor(url).orEmpty() }
                         if (scriptlets.isNotBlank()) view?.evaluateJavascript(scriptlets, null)
                     }
                 }
