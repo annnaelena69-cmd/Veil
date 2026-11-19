@@ -522,7 +522,7 @@ class MainActivity : Activity() {
         val back = TextView(this).apply {
             text = "‹"
             textSize = 32f
-            setTextColor(foreground)
+            setTextColor(this@MainActivity.foreground)
             gravity = Gravity.CENTER
             setOnClickListener { buildBrowser() }
         }
@@ -530,7 +530,7 @@ class MainActivity : Activity() {
         header.addView(TextView(this).apply {
             text = tr("Settings", "Pengaturan")
             textSize = 22f
-            setTextColor(foreground)
+            setTextColor(this@MainActivity.foreground)
             setTypeface(null, android.graphics.Typeface.BOLD)
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
         page.addView(header)
@@ -538,7 +538,7 @@ class MainActivity : Activity() {
         val search = EditText(this).apply {
             hint = tr("Search settings", "Cari pengaturan")
             textSize = 15f
-            setTextColor(foreground)
+            setTextColor(this@MainActivity.foreground)
             setHintTextColor(Color.GRAY)
             setSingleLine(true)
             setPadding(dp(16), 0, dp(16), 0)
@@ -621,8 +621,8 @@ class MainActivity : Activity() {
                 card.addView(TextView(this).apply {
                     text = entry.title
                     textSize = 16f
-                    setTextColor(foreground)
-                    setTypeface(null, android.graphics.Typeface.MEDIUM)
+                    setTextColor(this@MainActivity.foreground)
+                    setTypeface(null, android.graphics.Typeface.BOLD)
                 })
                 card.addView(TextView(this).apply {
                     text = entry.summary
@@ -635,7 +635,7 @@ class MainActivity : Activity() {
             }
             if (content.childCount == 0) content.addView(TextView(this).apply {
                 text = tr("No settings found", "Pengaturan tidak ditemukan")
-                setTextColor(foreground); setPadding(dp(12), dp(24), dp(12), dp(24))
+                setTextColor(this@MainActivity.foreground); setPadding(dp(12), dp(24), dp(12), dp(24))
             })
         }
         search.addTextChangedListener(object : android.text.TextWatcher {
