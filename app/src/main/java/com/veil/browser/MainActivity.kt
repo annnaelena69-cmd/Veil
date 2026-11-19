@@ -23,6 +23,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.webkit.JavascriptInterface
 import android.webkit.WebViewClient
 import android.webkit.PermissionRequest
 import android.webkit.GeolocationPermissions
@@ -96,7 +97,16 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("veil_local_settings", MODE_PRIVATE)
-        if (prefs.getString("language", null) == null) chooseLanguage(firstRun = true) else { applyAppLocale(); buildBrowser() }
+        if (prefs.getString("language", null) == null) {
+            chooseLanguage(firstRun = true)
+        } else {
+            applyAppLocale()
+            buildBrowser()
+            val lastPage = prefs.getString("last_page", null)
+            if (!lastPage.isNullOrBlank() && (lastPage.startsWith("https://") || lastPage.startsWith("http://"))) {
+                web.loadUrl(lastPage)
+            }
+        }
         refreshFiltersIfDue()
     }
 
@@ -276,6 +286,7 @@ class MainActivity : Activity() {
             setBackgroundColor(black)
             settings.javaScriptEnabled = true
             settings.setGeolocationEnabled(true)
+            settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
             settings.javaScriptCanOpenWindowsAutomatically = false
@@ -287,6 +298,16 @@ class MainActivity : Activity() {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) settings.safeBrowsingEnabled = true
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, !prefs.getBoolean("block_third_party_cookies", true))
+            addJavascriptInterface(object {
+                @JavascriptInterface
+                fun search(query: String) {
+                    runOnUiThread { navigate(query) }
+                }
+                @JavascriptInterface
+                fun openSettings() {
+                    runOnUiThread { settings() }
+                }
+            }, "VEIL")
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) {
                     runOnUiThread { handleWebPermissionRequest(request) }
@@ -336,6 +357,25 @@ class MainActivity : Activity() {
                     if (filterEngine().shouldBlock(requestUrl, pageUrl, request.isForMainFrame, accept) || blocked(host, mode)) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by VEIL", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     return super.shouldInterceptRequest(view, request)
                 }
+                override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
+                    val crashedView = view ?: return true
+                    val index = tabs.indexOf(crashedView)
+                    if (index < 0) {
+                        runCatching { crashedView.destroy() }
+                        return true
+                    }
+                    runCatching { webHost.removeView(crashedView) }
+                    runCatching { crashedView.stopLoading(); crashedView.destroy() }
+                    val replacement = createBrowserWebView()
+                    tabs[index] = replacement
+                    webHost.addView(replacement, FrameLayout.LayoutParams(-1, -1))
+                    if (index == activeTab) {
+                        web = replacement
+                        home()
+                        Toast.makeText(this@MainActivity, "VEIL recovered a browser page after WebView stopped.", Toast.LENGTH_LONG).show()
+                    }
+                    return true
+                }
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     if (view === web) url?.let { address.setText(it) }
@@ -356,6 +396,9 @@ class MainActivity : Activity() {
                     super.onPageFinished(view, url)
                     if (url != null && url.startsWith("http")) recordHistory(url)
                     if (view === web && url != null && ::address.isInitialized) address.setText(url)
+                    if (view === web && url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
+                        prefs.edit().putString("last_page", url).apply()
+                    }
                     if (url != null) {
                         val css = filterEngine().cosmeticCss(url)
                         if (css.isNotBlank()) {
@@ -400,14 +443,15 @@ class MainActivity : Activity() {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
             var sample = 1
-            while (bounds.outWidth / sample > 1280 || bounds.outHeight / sample > 1280) sample *= 2
+            while (bounds.outWidth / sample > 900 || bounds.outHeight / sample > 900) sample *= 2
             val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
             contentResolver.openInputStream(uri)?.use { input ->
                 val bitmap = BitmapFactory.decodeStream(input, null, options) ?: return@use null
                 val output = java.io.ByteArrayOutputStream()
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 72, output)
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 58, output)
                 bitmap.recycle()
-                "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                if (output.size() > 700_000) null
+                else "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
             }
         }.getOrNull()
         val backgroundCss = if (photoData != null) "background-image:linear-gradient(rgba(12,12,16,.52),rgba(12,12,16,.72)),url('$photoData');background-size:cover;background-position:center;" else "background:$bg;"
@@ -432,7 +476,14 @@ class MainActivity : Activity() {
         <main class="center"><div class="logo"><span class="mark">V</span><span>veil</span></div>
         <div class="search"><input id="q" autocomplete="off" placeholder="Search the web privately..." onkeydown="if(event.key==='Enter')go()"><button class="go" onclick="go()">⌕</button></div>
         <div class="suggest">Private search. Clean browsing.<br>Fast, focused, and yours.</div></main>
-        <script>function go(){var v=document.getElementById('q').value.trim();if(v)location.href='veilsearch://search?q='+encodeURIComponent(v)}</script>
+        <script>
+        function go(){
+          var field=document.getElementById('q');
+          var value=field.value.trim();
+          if(!value)return;
+          if(window.VEIL && window.VEIL.search){window.VEIL.search(value);}
+        }
+        </script>
         </body></html>"""
         web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null)
         address.setText("")
@@ -886,6 +937,21 @@ class MainActivity : Activity() {
         prefs.edit().remove("bookmarks").remove("history").apply()
         Toast.makeText(this,"Local browser data cleared",Toast.LENGTH_SHORT).show()
     }
+    override fun onResume() {
+        super.onResume()
+        if (::web.isInitialized) web.onResume()
+    }
+
+    override fun onPause() {
+        if (::web.isInitialized) {
+            web.onPause()
+            web.url?.takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let {
+                prefs.edit().putString("last_page", it).apply()
+            }
+        }
+        super.onPause()
+    }
+
     @Suppress("DEPRECATION")
     override fun onBackPressed() { if (::web.isInitialized && web.canGoBack()) web.goBack() else home() }
     override fun onDestroy() {
