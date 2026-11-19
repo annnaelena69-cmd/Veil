@@ -10,7 +10,7 @@ A privacy-focused Android browser prototype built with Kotlin and Android WebVie
 - Standard, Strong, and Super hostname-blocking levels.
 - Manual and scheduled downloads of EasyList and EasyPrivacy. The in-app matcher supports a limited ABP subset: anchored/wildcard URL patterns, domain scopes, selected resource types, first/third-party conditions, network exceptions, `badfilter`, basic cosmetic filters, exact `#@#` cosmetic exceptions, and selected page-level exceptions.
 - Homepage photo selection from device storage and rendering as the local home-page background.
-- Local bookmarks and a language picker with 100 locale choices. The picker is not equivalent to 100 complete UI translations.
+- Local bookmarks and a language picker with 50 locale choices. The picker is not equivalent to 50 complete UI translations.
 - Theme, accent, and search-engine preference controls.
 - Per-site allow/deny prompts for camera, microphone, and geolocation, backed by Android runtime permissions. Site preferences can be reset.
 - Third-party cookies are disabled for normal WebViews; EasyPrivacy rules and built-in tracker host lists provide additional best-effort blocking.
@@ -54,3 +54,15 @@ VEIL is actively developed. Feature availability is described above; planned wor
 ## Language support (v1)
 
 VEIL currently exposes 50 language/locale choices in the app language picker and Android locale configuration. This is a staged rollout, not a claim of complete translation into all 50 languages: the current in-app text catalog is still primarily English with Indonesian translations for selected interface strings. Other selected locales currently fall back to English until their complete UI catalogs are added and tested. Website translation is not part of this setting.
+
+
+## Privacy and DNS controls
+
+- Tracker protection can be toggled independently from the selected AdBlock level.
+- Third-party cookies can be blocked or allowed for normal tabs.
+- HTTPS-only mode upgrades typed HTTP addresses to HTTPS and blocks mixed-content loads where supported. It may prevent some sites from working.
+- Private DNS settings offer shortcuts for Cloudflare, Google, Quad9, and AdGuard DNS-over-TLS hostnames. VEIL copies the chosen hostname and opens Android's Private DNS settings; Android applies this device-wide. VEIL does not silently override system DNS.
+- Filter status displays downloaded rule-line and hostname counts plus the last successful update time.
+- AdBlock matching now handles ABP important rules and evaluates matching rules without allocating a temporary match list for every intercepted request.
+
+These controls improve the current prototype but do not make VEIL a complete DNS firewall, VPN, full ABP engine, or independently audited privacy browser. The 50 locale choices still require complete translation catalogs.
