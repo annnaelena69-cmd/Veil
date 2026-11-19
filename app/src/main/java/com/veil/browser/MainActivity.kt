@@ -45,12 +45,18 @@ class MainActivity : Activity() {
         "Midnight Dark" -> Color.rgb(12, 16, 25)
         "Minimal Grey" -> Color.rgb(28, 28, 31)
         "Light" -> Color.rgb(245, 245, 248)
+        "Ocean Blue" -> Color.rgb(7, 27, 45)
+        "Forest" -> Color.rgb(16, 37, 30)
+        "Sunset" -> Color.rgb(42, 23, 27)
         else -> Color.rgb(4, 4, 5)
     }
     private val panel: Int get() = when (prefs.getString("theme", "Obsidian Full Black")) {
         "Midnight Dark" -> Color.rgb(24, 31, 45)
         "Minimal Grey" -> Color.rgb(43, 43, 47)
         "Light" -> Color.rgb(225, 225, 232)
+        "Ocean Blue" -> Color.rgb(15, 49, 72)
+        "Forest" -> Color.rgb(26, 57, 43)
+        "Sunset" -> Color.rgb(67, 38, 42)
         else -> Color.rgb(19, 19, 22)
     }
     private val foreground: Int get() = if (prefs.getString("theme", "Obsidian Full Black") == "Light") Color.rgb(20, 20, 24) else Color.rgb(240, 240, 244)
@@ -271,6 +277,7 @@ class MainActivity : Activity() {
     }
 
     private fun home() {
+        if (!::web.isInitialized || !::status.isInitialized) return
         val photo = runCatching {
             val raw = prefs.getString("home_photo", null) ?: return@runCatching null
             contentResolver.openInputStream(Uri.parse(raw))?.use { input ->
@@ -280,10 +287,47 @@ class MainActivity : Activity() {
                 "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
             }
         }.getOrNull()
-        val background = if (photo != null) "background-image:linear-gradient(rgba(4,4,5,.62),rgba(4,4,5,.88)),url('$photo');background-size:cover;background-position:center;background-attachment:fixed;" else "background:#040405;"
-        val html = """<html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;$background color:#eee;font-family:sans-serif;text-align:center;padding:35px 18px;min-height:100vh;box-sizing:border-box"><h1 style="letter-spacing:8px;font-size:34px;margin-top:55px">VEIL</h1><p style="color:#ddd">Your browser. Your rules.</p><p style="margin-top:42px;color:#ddd">No account • Local settings • Privacy controls</p><p style="color:#bbb;font-size:12px">Search above or enter a website.</p></body></html>"""
-        web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null)
-        status.text = if (photo != null) "Custom gallery wallpaper active" else "Private by design"
+        val bg = when (prefs.getString("theme", "Obsidian Full Black")) {
+            "Midnight Dark" -> "#111827"
+            "Minimal Grey" -> "#25252b"
+            "Light" -> "#eef0f5"
+            "Ocean Blue" -> "#071b2d"
+            "Forest" -> "#10251e"
+            "Sunset" -> "#2a171b"
+            else -> "#050608"
+        }
+        val fg = if (prefs.getString("theme", "Obsidian Full Black") == "Light") "#20232b" else "#f4f5f8"
+        val accent = String.format("#%06X", 0xFFFFFF and accentColor)
+        val filterCount = (prefs.getString("downloaded_filter_rules", "") ?: "").lineSequence().count { it.isNotBlank() }
+        val wallpaper = if (photo != null) "background-image:linear-gradient(180deg,rgba(3,5,9,.55),rgba(3,5,9,.88)),url('$photo');background-size:cover;background-position:center;background-attachment:fixed;" else "background:$bg;"
+        val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta charset="utf-8"><style>
+        *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:24px 18px 34px;color:$fg;font-family:Arial,sans-serif;$wallpaper}
+        .brand{font-size:30px;font-weight:800;letter-spacing:7px;text-align:center;margin:28px 0 5px}.tag{text-align:center;opacity:.72;font-size:13px;margin:0 0 26px}
+        .card{background:rgba(120,125,135,.18);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:18px;margin:14px 0;backdrop-filter:blur(16px)}
+        .row{display:flex;justify-content:space-between;align-items:center;gap:10px}.muted{opacity:.72;font-size:12px}.big{font-size:27px;font-weight:700;color:$accent;margin:12px 0 2px}
+        .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.tile{display:block;text-decoration:none;color:$fg;text-align:center;background:rgba(120,125,135,.2);border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:16px 5px;font-size:12px}
+        .ico{font-size:23px;display:block;margin-bottom:8px}.section{font-weight:700;font-size:15px;margin-bottom:4px}.pill{display:inline-block;border-radius:99px;padding:7px 11px;background:rgba(120,125,135,.22);font-size:11px}
+        </style></head><body>
+        <div class="brand">VEIL</div><p class="tag">Your browser. Your rules.</p>
+        <section class="card"><div class="row"><b>🛡 Status privasi</b><span class="pill">● PROTEKSI AKTIF</span></div>
+        <div class="big">$filterCount</div><div class="muted">Aturan filter tersimpan • EasyList / EasyPrivacy</div>
+        <div class="row" style="margin-top:16px"><span class="muted">Tracker protection</span><b>${if (prefs.getBoolean("tracker_protection", true)) "ON" else "OFF"}</b></div>
+        <div class="row" style="margin-top:8px"><span class="muted">Blokir cookie pihak ketiga</span><b>${if (prefs.getBoolean("block_third_party_cookies", true)) "ON" else "OFF"}</b></div></section>
+        <section class="card"><div class="section">Akses cepat</div><div class="muted">Buka situs favorit</div>
+        <div class="grid">
+        <a class="tile" href="https://www.youtube.com/"><span class="ico">▶</span>YouTube</a>
+        <a class="tile" href="https://www.wikipedia.org/"><span class="ico">◈</span>Wikipedia</a>
+        <a class="tile" href="https://www.reddit.com/"><span class="ico">◎</span>Reddit</a>
+        <a class="tile" href="https://mail.google.com/"><span class="ico">✉</span>Gmail</a>
+        <a class="tile" href="https://github.com/"><span class="ico">⌘</span>GitHub</a>
+        <a class="tile" href="https://duckduckgo.com/"><span class="ico">⌕</span>Search</a>
+        </div></section>
+        <section class="card"><div class="section">Privasi & personalisasi</div><div class="muted">Tanpa akun • Pengaturan lokal • Tema dapat diubah</div>
+        <p style="margin:14px 0 0"><span class="pill">Tema: ${prefs.getString("theme", "Obsidian Full Black")}</span> <span class="pill">DNS Android</span></p></section>
+        </body></html>"""
+        runCatching { web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null) }
+            .onFailure { web.loadUrl("about:blank") }
+        status.text = if (photo != null) "Custom wallpaper • Private by design" else "Private by design"
     }
 
     private fun navigate(raw: String) {
@@ -480,7 +524,7 @@ class MainActivity : Activity() {
         }
     }
     private fun chooseTheme() {
-        val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light")
+        val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light","Ocean Blue","Forest","Sunset")
         AlertDialog.Builder(this).setTitle(tr("Theme","Tema")).setItems(names) { _, i ->
             prefs.edit().putString("theme",names[i]).apply()
             buildBrowser()
