@@ -141,12 +141,16 @@ class MainActivity : Activity() {
         status = label("Private by design", 11f).apply { gravity = Gravity.START }
         root.addView(status)
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(panel) }
-        listOf("Home","Back","Tabs","★","Settings").forEach { item ->
+        val homeLabel = tr("Home", "Beranda")
+        val backLabel = tr("Back", "Kembali")
+        val tabsLabel = tr("Tabs", "Tab")
+        val settingsLabel = tr("Settings", "Pengaturan")
+        listOf(homeLabel, backLabel, tabsLabel, "★", settingsLabel).forEach { item ->
             nav.addView(action(item) {
                 when (item) {
-                    "Home" -> home()
-                    "Back" -> if (web.canGoBack()) web.goBack() else home()
-                    "Tabs" -> tabsDialog()
+                    homeLabel -> home()
+                    backLabel -> if (web.canGoBack()) web.goBack() else home()
+                    tabsLabel -> tabsDialog()
                     "★" -> saveBookmark()
                     else -> settings()
                 }
@@ -213,7 +217,7 @@ class MainActivity : Activity() {
                 5 -> chooseSearch()
                 6 -> chooseLanguage()
                 7 -> clearData()
-                8 -> AlertDialog.Builder(this).setTitle("VEIL privacy").setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
+                8 -> AlertDialog.Builder(this).setTitle(tr("VEIL privacy","Privasi VEIL")).setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
             }
         }.show()
     }
@@ -299,7 +303,7 @@ class MainActivity : Activity() {
     }
     private fun tabsDialog() {
         val options = arrayOf("New tab","Private browsing","Close current tab","Show saved bookmarks")
-        AlertDialog.Builder(this).setTitle("Tabs & library").setItems(options) { _, i ->
+        AlertDialog.Builder(this).setTitle(tr("Tabs & library","Tab & pustaka")).setItems(options) { _, i ->
             when(i) {
                 0 -> { tabs.add("about:blank"); home() }
                 1 -> { privateMode = true; web.clearHistory(); web.clearCache(true); home(); Toast.makeText(this,"Private session started in this tab",Toast.LENGTH_SHORT).show() }
