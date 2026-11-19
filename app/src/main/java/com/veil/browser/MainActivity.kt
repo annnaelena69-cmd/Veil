@@ -79,6 +79,8 @@ class MainActivity : Activity() {
     private var pendingMediaResources: Array<String> = emptyArray()
     private var pendingGeoCallback: GeolocationPermissions.Callback? = null
     private var pendingGeoOrigin: String = ""
+    private var fullscreenView: android.view.View? = null
+    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
 
     private fun filterEngine(): FilterEngine {
         val stamp = prefs.getLong("filters_updated_at", 0L)
@@ -303,6 +305,37 @@ class MainActivity : Activity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) settings.safeBrowsingEnabled = true
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, !prefs.getBoolean("block_third_party_cookies", true))
             webChromeClient = object : WebChromeClient() {
+                override fun onShowCustomView(view: android.view.View?, callback: CustomViewCallback?) {
+                    if (view == null || fullscreenView != null) {
+                        callback?.onCustomViewHidden()
+                        return
+                    }
+                    val decor = window.decorView as? FrameLayout
+                    if (decor == null) {
+                        callback?.onCustomViewHidden()
+                        return
+                    }
+                    fullscreenView = view
+                    fullscreenCallback = callback
+                    if (::root.isInitialized) root.visibility = android.view.View.GONE
+                    decor.addView(view, FrameLayout.LayoutParams(-1, -1))
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = (
+                        android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
+                }
+                override fun onHideCustomView() {
+                    val decor = window.decorView as? FrameLayout
+                    fullscreenView?.let { runCatching { decor?.removeView(it) } }
+                    fullscreenView = null
+                    fullscreenCallback?.onCustomViewHidden()
+                    fullscreenCallback = null
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+                    if (::root.isInitialized) root.visibility = android.view.View.VISIBLE
+                }
                 override fun onPermissionRequest(request: PermissionRequest) {
                     runOnUiThread { handleWebPermissionRequest(request) }
                 }
@@ -1037,6 +1070,10 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onBackPressed() { if (::web.isInitialized && web.canGoBack()) web.goBack() else home() }
     override fun onDestroy() {
+        fullscreenView?.let { runCatching { (window.decorView as? FrameLayout)?.removeView(it) } }
+        fullscreenView = null
+        fullscreenCallback?.onCustomViewHidden()
+        fullscreenCallback = null
         pendingMediaRequest?.deny()
         pendingMediaRequest = null
         pendingGeoCallback?.invoke(pendingGeoOrigin, false, false)
