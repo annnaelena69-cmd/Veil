@@ -178,6 +178,8 @@ class MainActivity : Activity() {
         val strong = standard + listOf("googletagmanager.com","google-analytics.com","scorecardresearch.com","taboola.com","outbrain.com","criteo.com","hotjar.com","adsrvr.org","rubiconproject.com")
         val superBlock = strong + listOf("connect.facebook.net","facebook.net","branch.io","adjust.com","appsflyer.com","mixpanel.com","segment.io","amplitude.com","onesignal.com","moatads.com","pubmatic.com")
         val rules = when (mode) { "strong" -> strong; "super" -> superBlock; else -> standard }
+        val allowed = (prefs.getString("allowed_filter_domains", "") ?: "").split('\n').filter { it.isNotBlank() }
+        if (allowed.any { host == it || host.endsWith(".$it") }) return false
         val downloaded = (prefs.getString("downloaded_block_domains", "") ?: "").split('\n').filter { it.isNotBlank() }
         return (rules + downloaded).any { host == it || host.endsWith(".$it") }
     }
@@ -242,28 +244,47 @@ class MainActivity : Activity() {
     private fun refreshFilters(force: Boolean) {
         if (!force && System.currentTimeMillis() - prefs.getLong("filters_updated_at", 0L) < 7L * 24 * 60 * 60 * 1000) return
         Thread {
-            var connection: HttpURLConnection? = null
+            val blockedHosts = linkedSetOf<String>()
+            val allowedHosts = linkedSetOf<String>()
+            val sources = listOf(
+                "https://easylist.to/easylist/easylist.txt",
+                "https://easylist.to/easylist/easyprivacy.txt"
+            )
             try {
-                connection = (URL("https://easylist.to/easylist/easylist.txt").openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 12000
-                    readTimeout = 20000
-                    setRequestProperty("User-Agent", "VEIL-Browser/1.0")
-                }
-                val domains = linkedSetOf<String>()
-                connection.inputStream.bufferedReader().useLines { sourceLines ->
-                    sourceLines.forEach { sourceLine ->
-                        val rule = sourceLine.trim()
-                        if (rule.startsWith("||") && !rule.startsWith("|||")) {
-                            val host = rule.removePrefix("||").substringBefore('^').substringBefore(36.toChar()).substringBefore('/')
-                            if (host.contains('.') && host.length <= 253 && host.all { ch -> ch.isLetterOrDigit() || ch == '.' || ch == '-' }) domains.add(host.lowercase(Locale.ROOT))
-                        }
+                sources.forEach { source ->
+                    val connection = (URL(source).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15000
+                        readTimeout = 30000
+                        setRequestProperty("User-Agent", "VEIL-Browser/1.0")
                     }
+                    try {
+                        connection.inputStream.bufferedReader().useLines { lines ->
+                            lines.forEach lineLoop@{ raw ->
+                                val line = raw.trim()
+                                if (line.isEmpty() || line.startsWith("!") || line.startsWith("[")) return@lineLoop
+                                val exception = line.startsWith("@@||")
+                                val candidate = if (exception) line.removePrefix("@@||") else if (line.startsWith("||")) line.removePrefix("||") else return@lineLoop
+                                val host = candidate.substringBefore('^').substringBefore('/').substringBefore('$').lowercase(Locale.ROOT)
+                                if (host.contains('.') && host.length <= 253 && host.split('.').all { part -> part.isNotEmpty() && part.length <= 63 && part.all { ch -> ch.isLetterOrDigit() || ch == '-' } }) {
+                                    if (exception) allowedHosts.add(host) else blockedHosts.add(host)
+                                }
+                            }
+                        }
+                    } finally { connection.disconnect() }
                 }
-                prefs.edit().putString("downloaded_block_domains", domains.joinToString("\n")).putLong("filters_updated_at", System.currentTimeMillis()).apply()
-                runOnUiThread { if (::status.isInitialized) status.text = "Filter list updated • ${domains.size} host rules" }
+                if (blockedHosts.isEmpty()) throw IllegalStateException("No filter rules received")
+                prefs.edit()
+                    .putString("downloaded_block_domains", blockedHosts.joinToString("\n"))
+                    .putString("allowed_filter_domains", allowedHosts.joinToString("\n"))
+                    .putLong("filters_updated_at", System.currentTimeMillis())
+                    .apply()
+                runOnUiThread {
+                    if (::status.isInitialized) status.text = "AdBlock lists updated • " + blockedHosts.size + " block hosts • " + allowedHosts.size + " exceptions"
+                    Toast.makeText(this, "Filter lists updated", Toast.LENGTH_SHORT).show()
+                }
             } catch (_: Exception) {
-                runOnUiThread { if (force) Toast.makeText(this, "Filter update failed. Check internet and retry.", Toast.LENGTH_LONG).show() }
-            } finally { connection?.disconnect() }
+                runOnUiThread { if (force) Toast.makeText(this, "Filter update failed. Existing rules kept.", Toast.LENGTH_LONG).show() }
+            }
         }.start()
     }
 
