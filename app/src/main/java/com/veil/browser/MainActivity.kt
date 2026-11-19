@@ -385,7 +385,7 @@ class MainActivity : Activity() {
                 clipboard.setPrimaryClip(ClipData.newPlainText("Private DNS hostname", hosts[index]))
                 Toast.makeText(this, hosts[index] + " copied", Toast.LENGTH_LONG).show()
                 try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS))
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent("android.settings.PRIVATE_DNS_SETTINGS"))
                     else startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
                 } catch (_: Exception) {
                     startActivity(Intent(Settings.ACTION_SETTINGS))
@@ -393,7 +393,7 @@ class MainActivity : Activity() {
             }
             .setNeutralButton("Open DNS settings") { _, _ ->
                 try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS))
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent("android.settings.PRIVATE_DNS_SETTINGS"))
                     else startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
                 } catch (_: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
             }
