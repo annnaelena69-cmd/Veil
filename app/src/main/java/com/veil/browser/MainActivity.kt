@@ -196,108 +196,39 @@ class MainActivity : Activity() {
     private fun refreshFilters(force: Boolean) {
         if (!force && System.currentTimeMillis() - prefs.getLong("filters_updated_at", 0L) < 7L * 24 * 60 * 60 * 1000) return
         Thread {
+            var connection: HttpURLConnection? = null
             try {
-                val connection = (URL("https://easylist.to/easylist/easylist.txt").openConnection() as HttpURLConnection).apply {
+                connection = (URL("https://easylist.to/easylist/easylist.txt").openConnection() as HttpURLConnection).apply {
                     connectTimeout = 12000
                     readTimeout = 20000
-                    setRequestProperty("User-Agent", "VEIL-Browser/1.0 (filter-list updater)")
+                    setRequestProperty("User-Agent", "VEIL-Browser/1.0")
                 }
                 val domains = linkedSetOf<String>()
-                connection.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        val rule = line.trim()
+                connection.inputStream.bufferedReader().useLines { sourceLines ->
+                    sourceLines.forEach { sourceLine ->
+                        val rule = sourceLine.trim()
                         if (rule.startsWith("||") && !rule.startsWith("|||")) {
-                            val host = rule.removePrefix("||").substringBefore('^').substringBefore('
-        val names = arrayOf("Standard","Strong","Super Block • Most aggressive")
-        val keys = arrayOf("standard","strong","super")
-        AlertDialog.Builder(this).setTitle("AdBlock level").setSingleChoiceItems(names, keys.indexOf(prefs.getString("block_level","standard"))) { d, i ->
-            prefs.edit().putString("block_level",keys[i]).apply(); d.dismiss(); status.text = "AdBlock: " + names[i]
-        }.setNegativeButton("Cancel",null).show()
-    }
-    private fun pickPhoto() {
-        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }
-        startActivityForResult(i, 77)
-    }
-    @Deprecated("Use Activity Result API in a later update")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode,resultCode,data)
-        if (requestCode == 77 && resultCode == RESULT_OK) data?.data?.let { uri ->
-            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
-            prefs.edit().putString("home_photo",uri.toString()).apply()
-            status.text = "Gallery image selected"
-            home()
-            Toast.makeText(this,"Wallpaper applied to VEIL home",Toast.LENGTH_SHORT).show()
-        }
-    }
-    private fun chooseTheme() {
-        val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light")
-        AlertDialog.Builder(this).setTitle("Theme").setItems(names) { _, i ->
-            prefs.edit().putString("theme",names[i]).apply()
-            Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show()
-        }.show()
-    }
-    private fun chooseAccent() {
-        val names = arrayOf("Silver","Ice Blue","Emerald","Amber","Rose")
-        AlertDialog.Builder(this).setTitle("Accent").setItems(names) { _, i -> prefs.edit().putInt("accent",i).apply(); Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show() }.show()
-    }
-    private fun chooseSearch() {
-        val names = arrayOf("DuckDuckGo","Google","Bing","Brave Search")
-        val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
-        AlertDialog.Builder(this).setTitle("Search engine").setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
-    }
-    private fun saveBookmark() {
-        val url = web.url ?: return
-        val old = prefs.getString("bookmarks","") ?: ""
-        prefs.edit().putString("bookmarks", (old + url + "\n").takeLast(12000)).apply()
-        Toast.makeText(this,"Bookmark saved locally",Toast.LENGTH_SHORT).show()
-    }
-    private fun tabsDialog() {
-        val options = arrayOf("New tab","Private browsing","Close current tab","Show saved bookmarks")
-        AlertDialog.Builder(this).setTitle("Tabs & library").setItems(options) { _, i ->
-            when(i) {
-                0 -> { tabs.add("about:blank"); home() }
-                1 -> { privateMode = true; web.clearHistory(); web.clearCache(true); home(); Toast.makeText(this,"Private session started in this tab",Toast.LENGTH_SHORT).show() }
-                2 -> home()
-                3 -> showBookmarks()
-            }
-        }.show()
-    }
-    private fun showBookmarks() {
-        val list = (prefs.getString("bookmarks","") ?: "").lines().filter { it.startsWith("http") }.distinct()
-        if (list.isEmpty()) Toast.makeText(this,"No bookmarks saved",Toast.LENGTH_SHORT).show()
-        else AlertDialog.Builder(this).setTitle("Bookmarks").setItems(list.toTypedArray()) { _, i -> navigate(list[i]) }.setNegativeButton("Close",null).show()
-    }
-    private fun clearData() {
-        web.clearHistory(); web.clearCache(true); web.clearFormData()
-        CookieManager.getInstance().removeAllCookies(null); CookieManager.getInstance().flush()
-        prefs.edit().remove("bookmarks").apply()
-        Toast.makeText(this,"Local browser data cleared",Toast.LENGTH_SHORT).show()
-    }
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() { if (::web.isInitialized && web.canGoBack()) web.goBack() else home() }
-    override fun onDestroy() { if (::web.isInitialized) { web.stopLoading(); web.destroy() }; super.onDestroy() }
-}
-).substringBefore('/')
-                            if (host.contains('.') && host.length <= 253 && host.all { it.isLetterOrDigit() || it == '.' || it == '-' }) domains.add(host.lowercase(Locale.ROOT))
+                            val host = rule.removePrefix("||").substringBefore('^').substringBefore(36.toChar()).substringBefore('/')
+                            if (host.contains('.') && host.length <= 253 && host.all { ch -> ch.isLetterOrDigit() || ch == '.' || ch == '-' }) domains.add(host.lowercase(Locale.ROOT))
                         }
                     }
                 }
-                connection.disconnect()
-                prefs.edit().putString("downloaded_block_domains", domains.joinToString("\n"))
-                    .putLong("filters_updated_at", System.currentTimeMillis()).apply()
+                prefs.edit().putString("downloaded_block_domains", domains.joinToString("\n")).putLong("filters_updated_at", System.currentTimeMillis()).apply()
                 runOnUiThread { if (::status.isInitialized) status.text = "Filter list updated • ${domains.size} host rules" }
             } catch (_: Exception) {
                 runOnUiThread { if (force) Toast.makeText(this, "Filter update failed. Check internet and retry.", Toast.LENGTH_LONG).show() }
-            }
+            } finally { connection?.disconnect() }
         }.start()
     }
 
     private fun chooseBlock() {
-        val names = arrayOf("Standard","Strong","Super Block • Most aggressive")
-        val keys = arrayOf("standard","strong","super")
-        AlertDialog.Builder(this).setTitle("AdBlock level").setSingleChoiceItems(names, keys.indexOf(prefs.getString("block_level","standard"))) { d, i ->
-            prefs.edit().putString("block_level",keys[i]).apply(); d.dismiss(); status.text = "AdBlock: " + names[i]
-        }.setNegativeButton("Cancel",null).show()
+        val names = arrayOf("Standard", "Strong", "Super Block • Most aggressive")
+        val keys = arrayOf("standard", "strong", "super")
+        AlertDialog.Builder(this).setTitle("AdBlock level").setSingleChoiceItems(names, keys.indexOf(prefs.getString("block_level", "standard"))) { dialog, index ->
+            prefs.edit().putString("block_level", keys[index]).apply()
+            dialog.dismiss()
+            status.text = "AdBlock: " + names[index]
+        }.setNegativeButton("Cancel", null).show()
     }
     private fun pickPhoto() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }
