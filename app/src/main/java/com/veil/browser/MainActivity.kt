@@ -79,12 +79,9 @@ class MainActivity : Activity() {
         return cachedFilterEngine!!
     }
 
+    // VEIL v1 starts with 50 language choices. Translation coverage is tracked separately.
     private val languageCodes = listOf(
-        "en","id","ar","bn","bg","ca","zh","zh-TW","hr","cs","da","nl","et","fi","fr","de","el","gu","he","hi",
-        "hu","is","it","ja","kn","kk","km","ko","lo","lv","lt","mk","ms","ml","mr","mn","my","ne","no","fa",
-        "pl","pt","pa","ro","ru","sr","si","sk","sl","es","sw","sv","tl","ta","te","th","tr","uk","ur","uz",
-        "vi","af","sq","am","hy","az","eu","be","bs","ceb","co","eo","gl","ka","ht","ha","haw","hmn","ig","ga",
-        "jw","ku","ky","lb","mg","mt","mi","ny","ps","sm","gd","st","sn","sd","so","su","tg","tt","tk","yi"
+        "en","id","ms","zh","zh-TW","ja","ko","hi","bn","ur","ar","fa","he","th","vi","tl","ta","te","ml","kn","mr","gu","pa","ne","si","my","km","lo","fr","de","es","pt","it","nl","sv","no","da","fi","pl","cs","sk","hu","ro","bg","el","ru","uk","tr","sw","am"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -299,7 +296,7 @@ class MainActivity : Activity() {
             tr("Choose homepage photo from Gallery","Pilih foto halaman utama dari Galeri"),
             tr("Theme: Obsidian / Midnight / Light","Tema: Obsidian / Gelap / Terang"),
             tr("Accent color","Warna aksen"), tr("Search engine","Mesin pencari"),
-            tr("App language (100 locale choices)","Pilihan bahasa aplikasi (100 opsi lokal)"),
+            tr("Language options (50)","Pilihan bahasa (50)"),
             tr("Browsing history","Riwayat penjelajahan"), tr("Site permissions","Izin situs"), tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
         )
         AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
