@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
 import android.webkit.CookieManager
@@ -347,7 +348,10 @@ class MainActivity : Activity() {
                 }
                 1 -> showTabPicker()
                 2 -> closeCurrentTab()
-                3 -> startActivity(Intent(this, PrivateActivity::class.java))
+                3 -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(this, PrivateActivity::class.java))
+                    else Toast.makeText(this, "Isolated private mode requires Android 9 or newer.", Toast.LENGTH_LONG).show()
+                }
                 4 -> showBookmarks()
             }
         }.show()
