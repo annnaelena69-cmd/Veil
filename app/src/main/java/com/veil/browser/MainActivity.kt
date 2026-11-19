@@ -142,7 +142,53 @@ class MainActivity : Activity() {
     }
 
     private fun buildBrowser() {
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(black) }
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(black)
+            fitsSystemWindows = true
+        }
+
+        // Top address bar stays outside the WebView, so page content cannot cover it.
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            setBackgroundColor(black)
+        }
+        val addressPill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), 0, dp(8), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(panel)
+                cornerRadius = dp(17).toFloat()
+            }
+        }
+        address = EditText(this).apply {
+            isSingleLine = true
+            textSize = 15f
+            setTextColor(this@MainActivity.foreground)
+            setHintTextColor(Color.GRAY)
+            hint = tr("Search or enter address", "Cari atau masukkan alamat")
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            setBackgroundColor(Color.TRANSPARENT)
+            imeOptions = EditorInfo.IME_ACTION_GO
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setSelectAllOnFocus(true)
+            setOnEditorActionListener { _, id, _ ->
+                if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_ACTION_SEARCH || id == EditorInfo.IME_ACTION_DONE) {
+                    navigate(text.toString())
+                    true
+                } else false
+            }
+        }
+        addressPill.addView(address, LinearLayout.LayoutParams(0, dp(48), 1f))
+        addressPill.addView(action("↻") { if (web.url.isNullOrBlank() || web.url!!.contains("veil.local")) home() else web.reload() }, LinearLayout.LayoutParams(dp(38), dp(42)))
+        topBar.addView(addressPill, LinearLayout.LayoutParams(-1, dp(54)))
+        root.addView(topBar, LinearLayout.LayoutParams(-1, dp(62)))
+
+        // Web content occupies only the middle area. Bottom navigation is a native view,
+        // not HTML inside the page, so taps remain reliable on every website.
         webHost = FrameLayout(this)
         tabs.forEach { old -> runCatching { old.stopLoading(); old.destroy() } }
         tabs.clear()
@@ -151,40 +197,47 @@ class MainActivity : Activity() {
         activeTab = 0
         webHost.addView(web, FrameLayout.LayoutParams(-1, -1))
         root.addView(webHost, LinearLayout.LayoutParams(-1, 0, 1f))
-        val toolbar = LinearLayout(this).apply {
+
+        val bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            gravity = Gravity.CENTER
+            setPadding(dp(5), dp(4), dp(5), dp(4))
             setBackgroundColor(black)
+            elevation = dp(12).toFloat()
         }
-        val pill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(8), 0)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(panel); cornerRadius = dp(16).toFloat()
+        fun navItem(symbol: String, description: String, onTap: () -> Unit): TextView =
+            TextView(this).apply {
+                text = symbol
+                contentDescription = description
+                textSize = 23f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor)
+                isClickable = true
+                isFocusable = true
+                background = android.util.TypedValue().let {
+                    val out = android.util.TypedValue()
+                    theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, out, true)
+                    androidx.core.content.ContextCompat.getDrawable(this@MainActivity, out.resourceId)
+                }
+                setOnClickListener { onTap() }
+                layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
             }
-        }
-        address = EditText(this).apply {
-            isSingleLine = true; textSize = 14f; setTextColor(this@MainActivity.foreground); setHintTextColor(Color.GRAY)
-            hint = tr("Search or enter address", "Cari atau masukkan alamat")
-            setPadding(dp(4), dp(4), dp(4), dp(4)); setBackgroundColor(Color.TRANSPARENT)
-            imeOptions = EditorInfo.IME_ACTION_GO
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-            setSelectAllOnFocus(true)
-            setOnEditorActionListener { _, id, _ ->
-                if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_ACTION_SEARCH || id == EditorInfo.IME_ACTION_DONE) { navigate(text.toString()); true } else false
-            }
-        }
-        pill.addView(address, LinearLayout.LayoutParams(0, dp(46), 1f))
-        pill.addView(action("↵") { navigate(address.text.toString()) }, LinearLayout.LayoutParams(dp(36), dp(40)))
-        toolbar.addView(pill, LinearLayout.LayoutParams(0, dp(54), 1f))
-        toolbar.addView(action("1") { tabsDialog() }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(6) })
-        val menu = action("⋮") { }.apply { textSize = 25f; setOnClickListener { showBrowserMenu(this) } }
-        toolbar.addView(menu, LinearLayout.LayoutParams(dp(42), dp(48)))
-        root.addView(toolbar)
+
+        bottomBar.addView(navItem("⌂", "Home") { home() })
+        bottomBar.addView(navItem("▣", "Bookmarks") { showBookmarks() })
+        bottomBar.addView(navItem("⌕", "Search") {
+            address.requestFocus()
+            address.setSelection(address.text.length)
+            (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                ?.showSoftInput(address, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        })
+        bottomBar.addView(navItem("▢", "Tabs") { tabsDialog() })
+        bottomBar.addView(navItem("⋮", "Menu") { showBrowserMenu(bottomBar.getChildAt(4)) })
+        root.addView(bottomBar, LinearLayout.LayoutParams(-1, dp(58)))
+
         status = TextView(this).apply { visibility = android.view.View.GONE }
         setContentView(root)
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         home()
     }
 
