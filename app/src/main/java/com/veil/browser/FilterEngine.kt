@@ -119,7 +119,7 @@ class FilterEngine(lines: Collection<String>) {
             patternText = (if (anchoredStart) "^" else "") + wildcard(patternText) + (if (anchoredEnd) "$" else "")
         }
         return runCatching {
-            Rule(Regex(patternText, if (matchCase) 0 else RegexOption.IGNORE_CASE), exception, include, exclude, types, excludedTypes, thirdParty, matchCase)
+            Rule(if (matchCase) Regex(patternText) else Regex(patternText, RegexOption.IGNORE_CASE), exception, include, exclude, types, excludedTypes, thirdParty, matchCase)
         }.getOrNull()
     }
 
