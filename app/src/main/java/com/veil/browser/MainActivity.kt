@@ -189,7 +189,7 @@ class MainActivity : Activity() {
         toolbar.addView(addressPill, LinearLayout.LayoutParams(0, dp(54), 1f))
         val tabButton = action("1") { tabsDialog() }.apply { textSize = 16f }
         toolbar.addView(tabButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(6) })
-        val menuButton = action("⋮") { showBrowserMenu(it) }.apply { textSize = 25f }
+        val menuButton = action("⋮") { }.apply { textSize = 25f; setOnClickListener { showBrowserMenu(this) } }
         toolbar.addView(menuButton, LinearLayout.LayoutParams(dp(42), dp(48)))
         root.addView(toolbar)
         status = TextView(this).apply { text = "Private by design"; visibility = android.view.View.GONE }
@@ -355,8 +355,23 @@ class MainActivity : Activity() {
         }
         val fg = if (prefs.getString("theme", "Obsidian Full Black") == "Light") "#202027" else "#f5f5f7"
         val accent = String.format("#%06X", 0xFFFFFF and accentColor)
-        val wallpaper = prefs.getString("home_photo", null)
-        val backgroundCss = if (wallpaper != null) "background-image:linear-gradient(rgba(12,12,16,.52),rgba(12,12,16,.72)),url('veilwallpaper://selected');background-size:cover;background-position:center;" else "background:$bg;"
+        val photoData = runCatching {
+            val raw = prefs.getString("home_photo", null) ?: return@runCatching null
+            val uri = Uri.parse(raw)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (bounds.outWidth / sample > 1280 || bounds.outHeight / sample > 1280) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+            contentResolver.openInputStream(uri)?.use { input ->
+                val bitmap = BitmapFactory.decodeStream(input, null, options) ?: return@use null
+                val output = java.io.ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 72, output)
+                bitmap.recycle()
+                "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+            }
+        }.getOrNull()
+        val backgroundCss = if (photoData != null) "background-image:linear-gradient(rgba(12,12,16,.52),rgba(12,12,16,.72)),url('$photoData');background-size:cover;background-position:center;" else "background:$bg;"
         val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
         <style>
         *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Arial,sans-serif;color:$fg}
