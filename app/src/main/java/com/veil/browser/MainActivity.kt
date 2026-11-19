@@ -3,6 +3,8 @@ package com.veil.browser
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.DownloadManager
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
@@ -61,6 +63,10 @@ class MainActivity : Activity() {
     private lateinit var webHost: FrameLayout
     private var cachedFilterEngine: FilterEngine? = null
     private var cachedFilterStamp: Long = -1L
+    private var pendingMediaRequest: PermissionRequest? = null
+    private var pendingMediaResources: Array<String> = emptyArray()
+    private var pendingGeoCallback: GeolocationPermissions.Callback? = null
+    private var pendingGeoOrigin: String = ""
 
     private fun filterEngine(): FilterEngine {
         val stamp = prefs.getLong("filters_updated_at", 0L)
@@ -187,11 +193,11 @@ class MainActivity : Activity() {
             settings.allowContentAccess = false
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             webChromeClient = object : WebChromeClient() {
-                override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    runOnUiThread { handleWebPermissionRequest(request) }
+                }
                 override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
-                    val host = runCatching { Uri.parse(origin).host ?: "" }.getOrDefault("")
-                    val choice = prefs.getString("site_geo_" + host, "deny")
-                    callback.invoke(origin, choice == "allow", false)
+                    runOnUiThread { handleGeolocationRequest(origin, callback) }
                 }
             }
             setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -406,6 +412,118 @@ class MainActivity : Activity() {
         val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
         AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
     }
+    private fun hostKey(origin: String): String =
+        runCatching { Uri.parse(origin).host?.lowercase(Locale.ROOT).orEmpty() }.getOrDefault("")
+
+    private fun handleWebPermissionRequest(request: PermissionRequest) {
+        val host = hostKey(request.origin.toString())
+        val resources = request.resources.filter {
+            it == PermissionRequest.RESOURCE_AUDIO_CAPTURE || it == PermissionRequest.RESOURCE_VIDEO_CAPTURE
+        }.toTypedArray()
+        if (host.isBlank() || resources.isEmpty() || resources.size != request.resources.size) {
+            request.deny()
+            return
+        }
+        val key = "site_media_" + host
+        when (prefs.getString(key, "ask")) {
+            "deny" -> { request.deny(); return }
+            "allow" -> { requestMediaAtOsLevel(request, resources); return }
+        }
+        val labels = resources.map {
+            if (it == PermissionRequest.RESOURCE_VIDEO_CAPTURE) "camera" else "microphone"
+        }.distinct().joinToString(" and ")
+        AlertDialog.Builder(this)
+            .setTitle("VEIL permission")
+            .setMessage("$host wants to use your $labels.")
+            .setPositiveButton("Allow for this site") { _, _ ->
+                prefs.edit().putString(key, "allow").apply()
+                requestMediaAtOsLevel(request, resources)
+            }
+            .setNegativeButton("Block") { _, _ ->
+                prefs.edit().putString(key, "deny").apply()
+                request.deny()
+            }
+            .setOnCancelListener { request.deny() }
+            .show()
+    }
+
+    private fun requestMediaAtOsLevel(request: PermissionRequest, resources: Array<String>) {
+        val required = mutableListOf<String>()
+        if (resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) required.add(Manifest.permission.CAMERA)
+        if (resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) required.add(Manifest.permission.RECORD_AUDIO)
+        val missing = required.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) {
+            runCatching { request.grant(resources) }.onFailure { request.deny() }
+            return
+        }
+        pendingMediaRequest?.deny()
+        pendingMediaRequest = request
+        pendingMediaResources = resources
+        requestPermissions(missing.toTypedArray(), REQUEST_MEDIA_PERMISSIONS)
+    }
+
+    private fun handleGeolocationRequest(origin: String, callback: GeolocationPermissions.Callback) {
+        val host = hostKey(origin)
+        if (host.isBlank()) { callback.invoke(origin, false, false); return }
+        when (prefs.getString("site_geo_" + host, "ask")) {
+            "deny" -> { callback.invoke(origin, false, false); return }
+            "allow" -> { requestLocationAtOsLevel(origin, callback); return }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("VEIL location permission")
+            .setMessage("$host wants to access your device location.")
+            .setPositiveButton("Allow for this site") { _, _ ->
+                prefs.edit().putString("site_geo_" + host, "allow").apply()
+                requestLocationAtOsLevel(origin, callback)
+            }
+            .setNegativeButton("Block") { _, _ ->
+                prefs.edit().putString("site_geo_" + host, "deny").apply()
+                callback.invoke(origin, false, false)
+            }
+            .setOnCancelListener { callback.invoke(origin, false, false) }
+            .show()
+    }
+
+    private fun requestLocationAtOsLevel(origin: String, callback: GeolocationPermissions.Callback) {
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            callback.invoke(origin, true, false)
+            return
+        }
+        pendingGeoCallback = callback
+        pendingGeoOrigin = origin
+        requestPermissions(
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+            REQUEST_LOCATION_PERMISSIONS
+        )
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_MEDIA_PERMISSIONS) {
+            val request = pendingMediaRequest
+            val granted = permissions.isNotEmpty() && grantResults.isNotEmpty() &&
+                permissions.indices.all { grantResults[it] == PackageManager.PERMISSION_GRANTED }
+            if (request != null) {
+                if (granted) runCatching { request.grant(pendingMediaResources) }.onFailure { request.deny() }
+                else request.deny()
+            }
+            pendingMediaRequest = null
+            pendingMediaResources = emptyArray()
+        } else if (requestCode == REQUEST_LOCATION_PERMISSIONS) {
+            val callback = pendingGeoCallback
+            val granted = permissions.indices.any {
+                (permissions[it] == Manifest.permission.ACCESS_FINE_LOCATION ||
+                    permissions[it] == Manifest.permission.ACCESS_COARSE_LOCATION) &&
+                    grantResults.getOrNull(it) == PackageManager.PERMISSION_GRANTED
+            }
+            callback?.invoke(pendingGeoOrigin, granted, false)
+            pendingGeoCallback = null
+            pendingGeoOrigin = ""
+        }
+    }
+
     private fun applySiteJavaScript(host: String) {
         if (!::web.isInitialized || host.isBlank()) return
         web.settings.javaScriptEnabled = prefs.getString("site_js_" + host.lowercase(Locale.ROOT), "default") != "block"
@@ -416,14 +534,25 @@ class MainActivity : Activity() {
         if (host.isBlank()) { Toast.makeText(this, "Open a website first", Toast.LENGTH_SHORT).show(); return }
         val jsKey = "site_js_" + host
         val geoKey = "site_geo_" + host
-        val choices = arrayOf("JavaScript: default", "JavaScript: block", "Location: deny", "Location: allow", "Reset site settings")
+        val mediaKey = "site_media_" + host
+        val choices = arrayOf(
+            "JavaScript: allow", "JavaScript: block",
+            "Location: ask", "Location: allow", "Location: block",
+            "Camera & microphone: ask", "Camera & microphone: allow", "Camera & microphone: block",
+            "Notifications: unavailable in Android WebView", "Reset site settings"
+        )
         AlertDialog.Builder(this).setTitle("Site permissions • " + host).setItems(choices) { _, index ->
             when (index) {
                 0 -> prefs.edit().putString(jsKey, "default").apply()
                 1 -> prefs.edit().putString(jsKey, "block").apply()
-                2 -> prefs.edit().putString(geoKey, "deny").apply()
+                2 -> prefs.edit().remove(geoKey).apply()
                 3 -> prefs.edit().putString(geoKey, "allow").apply()
-                4 -> prefs.edit().remove(jsKey).remove(geoKey).apply()
+                4 -> prefs.edit().putString(geoKey, "deny").apply()
+                5 -> prefs.edit().remove(mediaKey).apply()
+                6 -> prefs.edit().putString(mediaKey, "allow").apply()
+                7 -> prefs.edit().putString(mediaKey, "deny").apply()
+                8 -> Toast.makeText(this, "Web notifications are not supported by this WebView implementation.", Toast.LENGTH_LONG).show()
+                9 -> prefs.edit().remove(jsKey).remove(geoKey).remove(mediaKey).apply()
             }
             applySiteJavaScript(host)
             Toast.makeText(this, "Site preference saved. Reload the page to apply changes.", Toast.LENGTH_SHORT).show()
@@ -514,5 +643,17 @@ class MainActivity : Activity() {
     }
     @Suppress("DEPRECATION")
     override fun onBackPressed() { if (::web.isInitialized && web.canGoBack()) web.goBack() else home() }
-    override fun onDestroy() { if (::web.isInitialized) { tabs.forEach { it.stopLoading(); it.destroy() }; tabs.clear() }; super.onDestroy() }
+    override fun onDestroy() {
+        pendingMediaRequest?.deny()
+        pendingMediaRequest = null
+        pendingGeoCallback?.invoke(pendingGeoOrigin, false, false)
+        pendingGeoCallback = null
+        if (::web.isInitialized) { tabs.forEach { it.stopLoading(); it.destroy() }; tabs.clear() }
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val REQUEST_MEDIA_PERMISSIONS = 810
+        private const val REQUEST_LOCATION_PERMISSIONS = 811
+    }
 }
