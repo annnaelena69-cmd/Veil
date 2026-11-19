@@ -217,7 +217,7 @@ class MainActivity : Activity() {
                 background = android.util.TypedValue().let {
                     val out = android.util.TypedValue()
                     theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, out, true)
-                    androidx.core.content.ContextCompat.getDrawable(this@MainActivity, out.resourceId)
+                    if (out.resourceId != 0) resources.getDrawable(out.resourceId, theme) else null
                 }
                 setOnClickListener { onTap() }
                 layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
