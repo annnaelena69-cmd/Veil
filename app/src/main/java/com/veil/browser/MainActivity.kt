@@ -10,6 +10,9 @@ import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.Settings
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.os.Bundle
 import android.os.Environment
 import android.os.Build
@@ -188,7 +191,11 @@ class MainActivity : Activity() {
             settings.setSupportMultipleWindows(false)
             settings.allowFileAccess = false
             settings.allowContentAccess = false
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                settings.mixedContentMode = if (prefs.getBoolean("https_only", true)) android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW else android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) settings.safeBrowsingEnabled = true
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, !prefs.getBoolean("block_third_party_cookies", true))
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) {
                     runOnUiThread { handleWebPermissionRequest(request) }
@@ -252,6 +259,7 @@ class MainActivity : Activity() {
     }
 
     private fun blocked(host: String, mode: String): Boolean {
+        if (!prefs.getBoolean("tracker_protection", true)) return false
         val standard = listOf("doubleclick.net","googlesyndication.com","googleadservices.com","adservice.google.com","adnxs.com")
         val strong = standard + listOf("googletagmanager.com","google-analytics.com","scorecardresearch.com","taboola.com","outbrain.com","criteo.com","hotjar.com","adsrvr.org","rubiconproject.com")
         val superBlock = strong + listOf("connect.facebook.net","facebook.net","branch.io","adjust.com","appsflyer.com","mixpanel.com","segment.io","amplitude.com","onesignal.com","moatads.com","pubmatic.com")
@@ -281,6 +289,7 @@ class MainActivity : Activity() {
     private fun navigate(raw: String) {
         var q = raw.trim()
         if (q.isEmpty()) return
+        if (prefs.getBoolean("https_only", true) && q.startsWith("http://", true)) q = "https://" + q.removePrefix("http://")
         if (!q.contains("://") && q.contains(".") && !q.contains(" ")) q = "https://$q"
         else if (!q.startsWith("https://") && !q.startsWith("http://")) {
             val engine = prefs.getString("search_engine", "https://duckduckgo.com/?q=") ?: "https://duckduckgo.com/?q="
@@ -291,29 +300,104 @@ class MainActivity : Activity() {
 
     private fun settings() {
         val items = arrayOf(
-            tr("AdBlock: Standard / Strong / Super Block","AdBlock: Standar / Kuat / Super Block"),
-            tr("Update AdBlock filter lists now","Perbarui daftar filter AdBlock"),
-            tr("Choose homepage photo from Gallery","Pilih foto halaman utama dari Galeri"),
-            tr("Theme: Obsidian / Midnight / Light","Tema: Obsidian / Gelap / Terang"),
-            tr("Accent color","Warna aksen"), tr("Search engine","Mesin pencari"),
-            tr("Language options (50)","Pilihan bahasa (50)"),
-            tr("Browsing history","Riwayat penjelajahan"), tr("Site permissions","Izin situs"), tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
+            "AdBlock level • Standard / Strong / Super",
+            "Update EasyList + EasyPrivacy",
+            "Filter engine status",
+            "Tracker protection: " + if (prefs.getBoolean("tracker_protection", true)) "ON" else "OFF",
+            "Block third-party cookies: " + if (prefs.getBoolean("block_third_party_cookies", true)) "ON" else "OFF",
+            "HTTPS-only mode: " + if (prefs.getBoolean("https_only", true)) "ON" else "OFF",
+            "Private DNS / DNS settings",
+            "Site permissions",
+            "App language • 50 choices",
+            "Homepage wallpaper",
+            "Theme",
+            "Accent color",
+            "Search engine",
+            "Browsing history",
+            "Clear browsing data",
+            "About VEIL & privacy"
         )
         AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
             when (which) {
                 0 -> chooseBlock()
                 1 -> refreshFilters(force = true)
-                2 -> pickPhoto()
-                3 -> chooseTheme()
-                4 -> chooseAccent()
-                5 -> chooseSearch()
-                6 -> chooseLanguage()
-                7 -> showHistory()
-                8 -> sitePermissions()
-                9 -> clearData()
-                10 -> AlertDialog.Builder(this).setTitle(tr("VEIL privacy","Privasi VEIL")).setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
+                2 -> showFilterStatus()
+                3 -> {
+                    val enabled = !prefs.getBoolean("tracker_protection", true)
+                    prefs.edit().putBoolean("tracker_protection", enabled).apply()
+                    settings()
+                    Toast.makeText(this, "Tracker protection " + if (enabled) "enabled" else "disabled", Toast.LENGTH_SHORT).show()
+                }
+                4 -> {
+                    val enabled = !prefs.getBoolean("block_third_party_cookies", true)
+                    prefs.edit().putBoolean("block_third_party_cookies", enabled).apply()
+                    tabs.forEach { CookieManager.getInstance().setAcceptThirdPartyCookies(it, !enabled) }
+                    settings()
+                }
+                5 -> {
+                    val enabled = !prefs.getBoolean("https_only", true)
+                    prefs.edit().putBoolean("https_only", enabled).apply()
+                    tabs.forEach { tab ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            tab.settings.mixedContentMode = if (enabled) android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW else android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                        }
+                    }
+                    settings()
+                }
+                6 -> dnsSettings()
+                7 -> sitePermissions()
+                8 -> chooseLanguage()
+                9 -> pickPhoto()
+                10 -> chooseTheme()
+                11 -> chooseAccent()
+                12 -> chooseSearch()
+                13 -> showHistory()
+                14 -> clearData()
+                15 -> AlertDialog.Builder(this).setTitle("VEIL privacy").setMessage("VEIL stores settings locally and includes no account or analytics SDK. EasyList and EasyPrivacy support is still a partial ABP implementation, not full uBlock Origin or Brave-level protection. HTTPS-only mode upgrades typed HTTP URLs and blocks mixed content; some sites may not work. Private DNS is configured in Android system settings and applies device-wide.").setPositiveButton("OK", null).show()
             }
         }.show()
+    }
+
+    private fun showFilterStatus() {
+        val rules = (prefs.getString("downloaded_filter_rules", "") ?: "").lines().count { it.isNotBlank() }
+        val hosts = (prefs.getString("downloaded_block_domains", "") ?: "").lines().count { it.isNotBlank() }
+        val updated = prefs.getLong("filters_updated_at", 0L)
+        val whenText = if (updated == 0L) "Never updated" else java.text.DateFormat.getDateTimeInstance().format(java.util.Date(updated))
+        AlertDialog.Builder(this).setTitle("VEIL filter status")
+            .setMessage("Parsed source lines: $rules\nBlock host entries: $hosts\nLast successful update: $whenText\n\nThe current engine supports an ABP subset. Unsupported rule syntax is skipped safely.")
+            .setPositiveButton("Update now") { _, _ -> refreshFilters(force = true) }
+            .setNegativeButton("Close", null).show()
+    }
+
+    private fun dnsSettings() {
+        val providers = arrayOf(
+            "Cloudflare • one.one.one.one",
+            "Google • dns.google",
+            "Quad9 • dns.quad9.net",
+            "AdGuard • dns.adguard-dns.com"
+        )
+        val hosts = arrayOf("one.one.one.one", "dns.google", "dns.quad9.net", "dns.adguard-dns.com")
+        AlertDialog.Builder(this)
+            .setTitle("Private DNS")
+            .setMessage("Choose a DNS-over-TLS provider. VEIL cannot silently change Android's system DNS. Select a provider to copy its hostname, then enter it in Android Private DNS settings. This setting applies device-wide, not only inside VEIL.")
+            .setItems(providers) { _, index ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Private DNS hostname", hosts[index]))
+                Toast.makeText(this, hosts[index] + " copied", Toast.LENGTH_LONG).show()
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS))
+                    else startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            }
+            .setNeutralButton("Open DNS settings") { _, _ ->
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS))
+                    else startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                } catch (_: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            }
+            .setNegativeButton("Close", null).show()
     }
 
     private fun refreshFiltersIfDue() {
