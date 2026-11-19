@@ -19,6 +19,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.PermissionRequest
+import android.webkit.GeolocationPermissions
 import android.widget.*
 import android.widget.FrameLayout
 import android.util.Base64
@@ -170,7 +172,14 @@ class MainActivity : Activity() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-            webChromeClient = WebChromeClient()
+            webChromeClient = object : WebChromeClient() {
+                override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
+                override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                    val host = runCatching { Uri.parse(origin).host ?: "" }.getOrDefault("")
+                    val choice = prefs.getString("site_geo_" + host, "deny")
+                    callback.invoke(origin, choice == "allow", false)
+                }
+            }
             setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
                 runCatching {
                     val request = DownloadManager.Request(Uri.parse(url))
@@ -190,6 +199,8 @@ class MainActivity : Activity() {
                 }
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val host = request?.url?.host?.lowercase(Locale.ROOT) ?: return null
+                    val jsBlocked = prefs.getString("site_js_" + host, "default") == "block"
+                    if (jsBlocked && request.url.path?.endsWith(".js", true) == true) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by site settings", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     val mode = prefs.getString("block_level", "standard") ?: "standard"
                     if (blocked(host, mode)) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by VEIL", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     return super.shouldInterceptRequest(view, request)
@@ -250,7 +261,7 @@ class MainActivity : Activity() {
             tr("Theme: Obsidian / Midnight / Light","Tema: Obsidian / Gelap / Terang"),
             tr("Accent color","Warna aksen"), tr("Search engine","Mesin pencari"),
             tr("App language (100 languages)","Bahasa aplikasi (100 bahasa)"),
-            tr("Browsing history","Riwayat penjelajahan"), tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
+            tr("Browsing history","Riwayat penjelajahan"), tr("Site permissions","Izin situs"), tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
         )
         AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
             when (which) {
@@ -262,8 +273,9 @@ class MainActivity : Activity() {
                 5 -> chooseSearch()
                 6 -> chooseLanguage()
                 7 -> showHistory()
-                8 -> clearData()
-                9 -> AlertDialog.Builder(this).setTitle(tr("VEIL privacy","Privasi VEIL")).setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
+                8 -> sitePermissions()
+                9 -> clearData()
+                10 -> AlertDialog.Builder(this).setTitle(tr("VEIL privacy","Privasi VEIL")).setMessage("No login, analytics SDK or telemetry endpoint is included. Filter updates download public filter rules only. Websites you visit still receive requests and may collect data. Current filter matching focuses on network host rules, not every cosmetic or script rule supported by desktop ad blockers.").setPositiveButton("OK", null).show()
             }
         }.show()
     }
@@ -361,6 +373,24 @@ class MainActivity : Activity() {
         val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
         AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
     }
+    private fun sitePermissions() {
+        val host = runCatching { Uri.parse(web.url ?: "").host ?: "" }.getOrDefault("")
+        if (host.isBlank()) { Toast.makeText(this, "Open a website first", Toast.LENGTH_SHORT).show(); return }
+        val jsKey = "site_js_" + host
+        val geoKey = "site_geo_" + host
+        val choices = arrayOf("JavaScript: default", "JavaScript: block", "Location: deny", "Location: allow", "Reset site settings")
+        AlertDialog.Builder(this).setTitle("Site permissions • " + host).setItems(choices) { _, index ->
+            when (index) {
+                0 -> prefs.edit().putString(jsKey, "default").apply()
+                1 -> prefs.edit().putString(jsKey, "block").apply()
+                2 -> prefs.edit().putString(geoKey, "deny").apply()
+                3 -> prefs.edit().putString(geoKey, "allow").apply()
+                4 -> prefs.edit().remove(jsKey).remove(geoKey).apply()
+            }
+            Toast.makeText(this, "Site preference saved", Toast.LENGTH_SHORT).show()
+        }.show()
+    }
+
     private fun recordHistory(url: String) {
         val old = prefs.getString("history", "") ?: ""
         val updated = (listOf(url) + old.lines().filter { it.isNotBlank() && it != url }).take(500)
