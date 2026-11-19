@@ -156,6 +156,7 @@ class MainActivity : Activity() {
         root.addView(header)
 
         webHost = FrameLayout(this)
+        tabs.forEach { old -> runCatching { old.stopLoading(); old.loadUrl("about:blank"); old.destroy() } }
         tabs.clear()
         web = createBrowserWebView()
         tabs.add(web)
@@ -229,7 +230,10 @@ class MainActivity : Activity() {
                     return true
                 }
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val host = request?.url?.host?.lowercase(Locale.ROOT) ?: return null
+                    val requestUri = request?.url ?: return null
+                    val host = requestUri.host?.lowercase(Locale.ROOT) ?: return null
+                    // Local VEIL UI must not be evaluated by remote filter lists.
+                    if (host == "veil.local" || host == "veil-private.local") return null
                     val jsBlocked = prefs.getString("site_js_" + host, "default") == "block"
                     if (jsBlocked && request.url.path?.endsWith(".js", true) == true) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by site settings", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     val mode = prefs.getString("block_level", "standard") ?: "standard"
@@ -281,9 +285,18 @@ class MainActivity : Activity() {
         val photo = runCatching {
             val raw = prefs.getString("home_photo", null) ?: return@runCatching null
             contentResolver.openInputStream(Uri.parse(raw))?.use { input ->
-                val bitmap = BitmapFactory.decodeStream(input) ?: return@use null
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                input.mark(1024 * 1024)
+                BitmapFactory.decodeStream(input, null, bounds)
+                try { input.reset() } catch (_: Exception) { return@use null }
+                val maxSide = 1440
+                var sample = 1
+                while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
+                val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+                val bitmap = BitmapFactory.decodeStream(input, null, options) ?: return@use null
                 val out = java.io.ByteArrayOutputStream()
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 76, out)
+                bitmap.recycle()
                 "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
             }
         }.getOrNull()
