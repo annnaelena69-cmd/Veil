@@ -143,53 +143,90 @@ class MainActivity : Activity() {
 
     private fun buildBrowser() {
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(black) }
-        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
-        header.addView(label("VEIL", 20f))
-        address = EditText(this).apply {
-            isSingleLine = true; textSize = 14f; setTextColor(this@MainActivity.foreground); setHintTextColor(Color.GRAY)
-            hint = tr("Search or enter website", "Cari atau masukkan situs"); setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(panel); imeOptions = EditorInfo.IME_ACTION_GO
-            setOnEditorActionListener { _, id, _ ->
-                if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_ACTION_SEARCH || id == EditorInfo.IME_ACTION_DONE) {
-                    navigate(text.toString()); true
-                } else false
-            }
-        }
-        header.addView(address, LinearLayout.LayoutParams(0, dp(44), 1f))
-        header.addView(action("GO") { navigate(address.text.toString()) })
-        root.addView(header)
-
         webHost = FrameLayout(this)
-        tabs.forEach { old -> runCatching { old.stopLoading(); old.loadUrl("about:blank"); old.destroy() } }
+        tabs.forEach { old -> runCatching { old.stopLoading(); old.destroy() } }
         tabs.clear()
         web = createBrowserWebView()
         tabs.add(web)
         activeTab = 0
         webHost.addView(web, FrameLayout.LayoutParams(-1, -1))
         root.addView(webHost, LinearLayout.LayoutParams(-1, 0, 1f))
-        status = label("Private by design", 11f).apply { gravity = Gravity.START }
-        root.addView(status)
-        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(panel) }
-        val homeLabel = tr("Home", "Beranda")
-        val backLabel = tr("Back", "Kembali")
-        val tabsLabel = tr("Tabs", "Tab")
-        val settingsLabel = tr("Settings", "Pengaturan")
-        listOf(homeLabel, backLabel, tabsLabel, "★", settingsLabel).forEach { item ->
-            nav.addView(action(item) {
-                when (item) {
-                    homeLabel -> home()
-                    backLabel -> if (web.canGoBack()) web.goBack() else home()
-                    tabsLabel -> tabsDialog()
-                    "★" -> saveBookmark()
-                    else -> settings()
-                }
-            }, LinearLayout.LayoutParams(0, dp(50), 1f))
+
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setBackgroundColor(black)
         }
-        root.addView(nav)
+        val addressPill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(8), 0)
+            setBackgroundColor(panel)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(panel); cornerRadius = dp(16).toFloat()
+            }
+        }
+        address = EditText(this).apply {
+            isSingleLine = true
+            textSize = 14f
+            setTextColor(foreground)
+            setHintTextColor(Color.GRAY)
+            hint = tr("Search or enter address", "Cari atau masukkan alamat")
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            setBackgroundColor(Color.TRANSPARENT)
+            imeOptions = EditorInfo.IME_ACTION_GO
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setSelectAllOnFocus(true)
+            setOnEditorActionListener { _, id, _ ->
+                if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_ACTION_SEARCH || id == EditorInfo.IME_ACTION_DONE) {
+                    navigate(text.toString()); true
+                } else false
+            }
+        }
+        addressPill.addView(address, LinearLayout.LayoutParams(0, dp(46), 1f))
+        addressPill.addView(action("↵") { navigate(address.text.toString()) }, LinearLayout.LayoutParams(dp(36), dp(40)))
+        toolbar.addView(addressPill, LinearLayout.LayoutParams(0, dp(54), 1f))
+        val tabButton = action("1") { tabsDialog() }.apply { textSize = 16f }
+        toolbar.addView(tabButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(6) })
+        val menuButton = action("⋮") { showBrowserMenu(it) }.apply { textSize = 25f }
+        toolbar.addView(menuButton, LinearLayout.LayoutParams(dp(42), dp(48)))
+        root.addView(toolbar)
+        status = TextView(this).apply { text = "Private by design"; visibility = android.view.View.GONE }
         setContentView(root)
         home()
     }
 
+    private fun showBrowserMenu(anchor: android.view.View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add("New tab").setOnMenuItemClickListener { newTab(); true }
+        popup.menu.add("Private tab").setOnMenuItemClickListener {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(this, PrivateActivity::class.java))
+            else Toast.makeText(this, "Private mode requires Android 9+", Toast.LENGTH_SHORT).show()
+            true
+        }
+        popup.menu.add("Tabs • ${tabs.size}").setOnMenuItemClickListener { tabsDialog(); true }
+        popup.menu.add("Bookmarks").setOnMenuItemClickListener { showBookmarks(); true }
+        popup.menu.add("History").setOnMenuItemClickListener { showHistory(); true }
+        popup.menu.add("Downloads").setOnMenuItemClickListener {
+            runCatching { startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)) }
+                .onFailure { Toast.makeText(this, "Downloads unavailable", Toast.LENGTH_SHORT).show() }
+            true
+        }
+        popup.menu.add("Site permissions").setOnMenuItemClickListener { sitePermissions(); true }
+        popup.menu.add("Settings").setOnMenuItemClickListener { settings(); true }
+        popup.menu.add("Refresh").setOnMenuItemClickListener { web.reload(); true }
+        popup.show()
+    }
+
+    private fun newTab() {
+        val next = createBrowserWebView()
+        tabs.add(next)
+        activeTab = tabs.lastIndex
+        webHost.addView(next, FrameLayout.LayoutParams(-1, -1))
+        showActiveTab()
+        home()
+    }
 
     private fun createBrowserWebView(): WebView {
         return WebView(this).apply {
@@ -229,6 +266,12 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val uri = request?.url ?: return false
+                    if (uri.scheme == "veilsearch") {
+                        val query = uri.getQueryParameter("q").orEmpty()
+                        navigate(query)
+                        return true
+                    }
+                    if (uri.scheme == "veilaction" && uri.host == "settings") { settings(); return true }
                     if (view === web) applySiteJavaScript(uri.host ?: "")
                     if (uri.scheme == "https" || uri.scheme == "http") { if (view === web) address.setText(uri.toString()); return false }
                     return true
@@ -300,527 +343,63 @@ class MainActivity : Activity() {
     }
 
     private fun home() {
-        if (!::web.isInitialized || !::status.isInitialized) return
-        val photo = runCatching {
-            val raw = prefs.getString("home_photo", null) ?: return@runCatching null
-            val uri = Uri.parse(raw)
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            val maxSide = 1440
-            var sample = 1
-            while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
-            val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
-            contentResolver.openInputStream(uri)?.use { input ->
-                val bitmap = BitmapFactory.decodeStream(input, null, options) ?: return@use null
-                val out = java.io.ByteArrayOutputStream()
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 76, out)
-                bitmap.recycle()
-                "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-            }
-        }.getOrNull()
+        if (!::web.isInitialized) return
         val bg = when (prefs.getString("theme", "Obsidian Full Black")) {
-            "Midnight Dark" -> "#111827"
-            "Minimal Grey" -> "#25252b"
-            "Light" -> "#eef0f5"
-            "Ocean Blue" -> "#071b2d"
-            "Forest" -> "#10251e"
-            "Sunset" -> "#2a171b"
-            else -> "#050608"
+            "Midnight Dark" -> "#11131b"
+            "Minimal Grey" -> "#222226"
+            "Light" -> "#f0f0f4"
+            "Ocean Blue" -> "#081b2c"
+            "Forest" -> "#10231d"
+            "Sunset" -> "#24191d"
+            else -> "#19191e"
         }
-        val fg = if (prefs.getString("theme", "Obsidian Full Black") == "Light") "#20232b" else "#f4f5f8"
+        val fg = if (prefs.getString("theme", "Obsidian Full Black") == "Light") "#202027" else "#f5f5f7"
         val accent = String.format("#%06X", 0xFFFFFF and accentColor)
-        val filterCount = (prefs.getString("downloaded_filter_rules", "") ?: "").lineSequence().count { it.isNotBlank() }
-        val wallpaper = if (photo != null) "background-image:linear-gradient(180deg,rgba(3,5,9,.55),rgba(3,5,9,.88)),url('$photo');background-size:cover;background-position:center;background-attachment:fixed;" else "background:$bg;"
-        val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta charset="utf-8"><style>
-        *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:24px 18px 34px;color:$fg;font-family:Arial,sans-serif;$wallpaper}
-        .brand{font-size:30px;font-weight:800;letter-spacing:7px;text-align:center;margin:28px 0 5px}.tag{text-align:center;opacity:.72;font-size:13px;margin:0 0 26px}
-        .card{background:rgba(120,125,135,.18);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:18px;margin:14px 0;backdrop-filter:blur(16px)}
-        .row{display:flex;justify-content:space-between;align-items:center;gap:10px}.muted{opacity:.72;font-size:12px}.big{font-size:27px;font-weight:700;color:$accent;margin:12px 0 2px}
-        .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.tile{display:block;text-decoration:none;color:$fg;text-align:center;background:rgba(120,125,135,.2);border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:16px 5px;font-size:12px}
-        .ico{font-size:23px;display:block;margin-bottom:8px}.section{font-weight:700;font-size:15px;margin-bottom:4px}.pill{display:inline-block;border-radius:99px;padding:7px 11px;background:rgba(120,125,135,.22);font-size:11px}
+        val wallpaper = prefs.getString("home_photo", null)
+        val backgroundCss = if (wallpaper != null) "background-image:linear-gradient(rgba(12,12,16,.52),rgba(12,12,16,.72)),url('veilwallpaper://selected');background-size:cover;background-position:center;" else "background:$bg;"
+        val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+        <style>
+        *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Arial,sans-serif;color:$fg}
+        body{position:relative;$backgroundCss}
+        .waves{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.32}
+        .gear{position:absolute;top:6%;right:7%;color:#9b9ba5;font-size:25px;text-decoration:none;z-index:2}
+        .center{position:absolute;left:0;right:0;top:27%;transform:translateY(-5%);padding:0 18px;text-align:center}
+        .logo{font-size:54px;font-weight:800;letter-spacing:-3px;margin-bottom:48px;display:flex;justify-content:center;align-items:center;gap:12px}
+        .mark{width:56px;height:62px;background:$accent;clip-path:polygon(20% 0,80% 0,100% 24%,87% 76%,50% 100%,13% 76%,0 24%);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:35px;font-weight:900}
+        .search{height:68px;border-radius:27px;background:rgba(105,105,115,.22);border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;padding:0 18px;box-shadow:0 8px 28px rgba(0,0,0,.12)}
+        input{width:100%;border:0;outline:0;background:transparent;color:$fg;font-size:19px;min-width:0}
+        input::placeholder{color:#9999a4}.go{border:0;background:transparent;color:$accent;font-size:25px;padding:8px}
+        .suggest{margin-top:38px;text-align:left;opacity:.4;font-size:14px;line-height:2.5;padding:0 20px}
         </style></head><body>
-        <div class="brand">VEIL</div><p class="tag">Your browser. Your rules.</p>
-        <section class="card"><div class="row"><b>🛡 Status privasi</b><span class="pill">● PROTEKSI AKTIF</span></div>
-        <div class="big">$filterCount</div><div class="muted">Aturan filter tersimpan • EasyList / EasyPrivacy</div>
-        <div class="row" style="margin-top:16px"><span class="muted">Tracker protection</span><b>${if (prefs.getBoolean("tracker_protection", true)) "ON" else "OFF"}</b></div>
-        <div class="row" style="margin-top:8px"><span class="muted">Blokir cookie pihak ketiga</span><b>${if (prefs.getBoolean("block_third_party_cookies", true)) "ON" else "OFF"}</b></div></section>
-        <section class="card"><div class="section">Akses cepat</div><div class="muted">Buka situs favorit</div>
-        <div class="grid">
-        <a class="tile" href="https://www.youtube.com/"><span class="ico">▶</span>YouTube</a>
-        <a class="tile" href="https://www.wikipedia.org/"><span class="ico">◈</span>Wikipedia</a>
-        <a class="tile" href="https://www.reddit.com/"><span class="ico">◎</span>Reddit</a>
-        <a class="tile" href="https://mail.google.com/"><span class="ico">✉</span>Gmail</a>
-        <a class="tile" href="https://github.com/"><span class="ico">⌘</span>GitHub</a>
-        <a class="tile" href="https://duckduckgo.com/"><span class="ico">⌕</span>Search</a>
-        </div></section>
-        <section class="card"><div class="section">Privasi & personalisasi</div><div class="muted">Tanpa akun • Pengaturan lokal • Tema dapat diubah</div>
-        <p style="margin:14px 0 0"><span class="pill">Tema: ${prefs.getString("theme", "Obsidian Full Black")}</span> <span class="pill">DNS Android</span></p></section>
+        <svg class="waves" viewBox="0 0 390 850" preserveAspectRatio="none"><g fill="none" stroke="#777783" stroke-width="1">
+        <path d="M-30 20 Q150 80 420 5"/><path d="M-30 48 Q150 108 420 33"/><path d="M-30 76 Q150 136 420 61"/><path d="M-30 104 Q150 164 420 89"/><path d="M-30 132 Q150 192 420 117"/><path d="M-30 160 Q150 220 420 145"/>
+        <path d="M-30 690 Q160 590 420 700"/><path d="M-30 720 Q160 620 420 730"/><path d="M-30 750 Q160 650 420 760"/><path d="M-30 780 Q160 680 420 790"/><path d="M-30 810 Q160 710 420 820"/><path d="M-30 840 Q160 740 420 850"/>
+        </g></svg>
+        <a class="gear" href="veilaction://settings">⚙</a>
+        <main class="center"><div class="logo"><span class="mark">V</span><span>veil</span></div>
+        <div class="search"><input id="q" autocomplete="off" placeholder="Search the web privately..." onkeydown="if(event.key==='Enter')go()"><button class="go" onclick="go()">⌕</button></div>
+        <div class="suggest">Private search. Clean browsing.<br>Fast, focused, and yours.</div></main>
+        <script>function go(){var v=document.getElementById('q').value.trim();if(v)location.href='veilsearch://search?q='+encodeURIComponent(v)}</script>
         </body></html>"""
-        runCatching { web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null) }
-            .onFailure { web.loadUrl("about:blank") }
-        status.text = if (photo != null) "Custom wallpaper • Private by design" else "Private by design"
+        web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null)
+        address.setText("")
+        address.hint = "Search or enter address"
     }
 
-    private fun navigate(raw: String) {
-        var q = raw.trim()
-        if (q.isEmpty()) return
-        if (prefs.getBoolean("https_only", true) && q.startsWith("http://", true)) q = "https://" + q.removePrefix("http://")
-        if (!q.contains("://") && q.contains(".") && !q.contains(" ")) q = "https://$q"
-        else if (!q.startsWith("https://") && !q.startsWith("http://")) {
-            val engine = prefs.getString("search_engine", "https://duckduckgo.com/?q=") ?: "https://duckduckgo.com/?q="
-            q = engine + URLEncoder.encode(q, "UTF-8")
-        }
-        runCatching {
-            web.stopLoading()
-            web.loadUrl(q)
-            address.clearFocus()
-            (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
-                ?.hideSoftInputFromWindow(address.windowToken, 0)
-        }.onFailure {
-            Toast.makeText(this, "Tidak dapat membuka alamat tersebut", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun settings() {
-        val items = arrayOf(
-            "AdBlock level • Standard / Strong / Super",
-            "Update EasyList + EasyPrivacy",
-            "Filter engine status",
-            "Tracker protection: " + if (prefs.getBoolean("tracker_protection", true)) "ON" else "OFF",
-            "Block third-party cookies: " + if (prefs.getBoolean("block_third_party_cookies", true)) "ON" else "OFF",
-            "HTTPS-only mode: " + if (prefs.getBoolean("https_only", true)) "ON" else "OFF",
-            "Private DNS / DNS settings",
-            "Site permissions",
-            "App language • 50 choices",
-            "Homepage wallpaper",
-            "Theme",
-            "Accent color",
-            "Search engine",
-            "Browsing history",
-            "Clear browsing data",
-            "About VEIL & privacy"
-        )
-        AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
-            when (which) {
-                0 -> chooseBlock()
-                1 -> refreshFilters(force = true)
-                2 -> showFilterStatus()
-                3 -> {
-                    val enabled = !prefs.getBoolean("tracker_protection", true)
-                    prefs.edit().putBoolean("tracker_protection", enabled).apply()
-                    settings()
-                    Toast.makeText(this, "Tracker protection " + if (enabled) "enabled" else "disabled", Toast.LENGTH_SHORT).show()
-                }
-                4 -> {
-                    val enabled = !prefs.getBoolean("block_third_party_cookies", true)
-                    prefs.edit().putBoolean("block_third_party_cookies", enabled).apply()
-                    tabs.forEach { CookieManager.getInstance().setAcceptThirdPartyCookies(it, !enabled) }
-                    settings()
-                }
-                5 -> {
-                    val enabled = !prefs.getBoolean("https_only", true)
-                    prefs.edit().putBoolean("https_only", enabled).apply()
-                    tabs.forEach { tab ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            tab.settings.mixedContentMode = if (enabled) android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW else android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        }
-                    }
-                    settings()
-                }
-                6 -> dnsSettings()
-                7 -> sitePermissions()
-                8 -> chooseLanguage()
-                9 -> pickPhoto()
-                10 -> chooseTheme()
-                11 -> chooseAccent()
-                12 -> chooseSearch()
-                13 -> showHistory()
-                14 -> clearData()
-                15 -> AlertDialog.Builder(this).setTitle("VEIL privacy").setMessage("VEIL stores settings locally and includes no account or analytics SDK. EasyList and EasyPrivacy support is still a partial ABP implementation, not full uBlock Origin or Brave-level protection. HTTPS-only mode upgrades typed HTTP URLs and blocks mixed content; some sites may not work. Private DNS is configured in Android system settings and applies device-wide.").setPositiveButton("OK", null).show()
-            }
-        }.show()
-    }
-
-    private fun showFilterStatus() {
-        val rules = (prefs.getString("downloaded_filter_rules", "") ?: "").lines().count { it.isNotBlank() }
-        val hosts = (prefs.getString("downloaded_block_domains", "") ?: "").lines().count { it.isNotBlank() }
-        val updated = prefs.getLong("filters_updated_at", 0L)
-        val whenText = if (updated == 0L) "Never updated" else java.text.DateFormat.getDateTimeInstance().format(java.util.Date(updated))
-        AlertDialog.Builder(this).setTitle("VEIL filter status")
-            .setMessage("Parsed source lines: $rules\nBlock host entries: $hosts\nLast successful update: $whenText\n\nThe current engine supports an ABP subset. Unsupported rule syntax is skipped safely.")
-            .setPositiveButton("Update now") { _, _ -> refreshFilters(force = true) }
-            .setNegativeButton("Close", null).show()
-    }
-
-    private fun dnsSettings() {
-        val providers = arrayOf(
-            "Cloudflare • one.one.one.one",
-            "Google • dns.google",
-            "Quad9 • dns.quad9.net",
-            "AdGuard • dns.adguard-dns.com"
-        )
-        val hosts = arrayOf("one.one.one.one", "dns.google", "dns.quad9.net", "dns.adguard-dns.com")
-        AlertDialog.Builder(this)
-            .setTitle("Private DNS")
-            .setMessage("Choose a DNS-over-TLS provider. VEIL cannot silently change Android's system DNS. Select a provider to copy its hostname, then enter it in Android Private DNS settings. This setting applies device-wide, not only inside VEIL.")
-            .setItems(providers) { _, index ->
-                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Private DNS hostname", hosts[index]))
-                Toast.makeText(this, hosts[index] + " copied", Toast.LENGTH_LONG).show()
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent("android.settings.PRIVATE_DNS_SETTINGS"))
-                    else startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
-                } catch (_: Exception) {
-                    startActivity(Intent(Settings.ACTION_SETTINGS))
-                }
-            }
-            .setNeutralButton("Open DNS settings") { _, _ ->
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent("android.settings.PRIVATE_DNS_SETTINGS"))
-                    else startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
-                } catch (_: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
-            }
-            .setNegativeButton("Close", null).show()
-    }
-
-    private fun refreshFiltersIfDue() {
-        val last = prefs.getLong("filters_updated_at", 0L)
-        if (System.currentTimeMillis() - last > 7L * 24 * 60 * 60 * 1000) refreshFilters(force = false)
-    }
-
-    private fun refreshFilters(force: Boolean) {
-        if (!force && System.currentTimeMillis() - prefs.getLong("filters_updated_at", 0L) < 7L * 24 * 60 * 60 * 1000) return
-        Thread {
-            val blockedHosts = linkedSetOf<String>()
-            val allowedHosts = linkedSetOf<String>()
-            val allRules = linkedSetOf<String>()
-            val sources = listOf(
-                "https://easylist.to/easylist/easylist.txt",
-                "https://easylist.to/easylist/easyprivacy.txt"
-            )
-            try {
-                sources.forEach { source ->
-                    val connection = (URL(source).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 15000
-                        readTimeout = 30000
-                        setRequestProperty("User-Agent", "VEIL-Browser/1.0")
-                    }
-                    try {
-                        connection.inputStream.bufferedReader().useLines { lines ->
-                            lines.forEach lineLoop@{ raw ->
-                                val line = raw.trim()
-                                if (line.isNotEmpty()) allRules.add(line)
-                                if (line.isEmpty() || line.startsWith("!") || line.startsWith("[")) return@lineLoop
-                                val exception = line.startsWith("@@||")
-                                val candidate = if (exception) line.removePrefix("@@||") else if (line.startsWith("||")) line.removePrefix("||") else return@lineLoop
-                                val host = candidate.substringBefore('^').substringBefore('/').substringBefore('$').lowercase(Locale.ROOT)
-                                if (host.contains('.') && host.length <= 253 && host.split('.').all { part -> part.isNotEmpty() && part.length <= 63 && part.all { ch -> ch.isLetterOrDigit() || ch == '-' } }) {
-                                    if (exception) allowedHosts.add(host) else blockedHosts.add(host)
-                                }
-                            }
-                        }
-                    } finally { connection.disconnect() }
-                }
-                if (blockedHosts.isEmpty()) throw IllegalStateException("No filter rules received")
-                prefs.edit()
-                    .putString("downloaded_block_domains", blockedHosts.joinToString("\n"))
-                    .putString("allowed_filter_domains", allowedHosts.joinToString("\n"))
-                    .putString("downloaded_filter_rules", allRules.joinToString("\n"))
-                    .putLong("filters_updated_at", System.currentTimeMillis())
-                    .apply()
-                runOnUiThread {
-                    if (::status.isInitialized) status.text = "AdBlock lists updated • " + blockedHosts.size + " block hosts • " + allowedHosts.size + " exceptions"
-                    Toast.makeText(this, "Filter lists updated", Toast.LENGTH_SHORT).show()
-                }
-            } catch (_: Exception) {
-                runOnUiThread { if (force) Toast.makeText(this, "Filter update failed. Existing rules kept.", Toast.LENGTH_LONG).show() }
-            }
-        }.start()
-    }
-
-    private fun chooseBlock() {
-        val names = arrayOf("Standard", "Strong", "Super Block • Most aggressive")
-        val keys = arrayOf("standard", "strong", "super")
-        AlertDialog.Builder(this).setTitle(tr("AdBlock level","Tingkat AdBlock")).setSingleChoiceItems(names, keys.indexOf(prefs.getString("block_level", "standard"))) { dialog, index ->
-            prefs.edit().putString("block_level", keys[index]).apply()
-            dialog.dismiss()
-            status.text = "AdBlock: " + names[index]
-        }.setNegativeButton("Cancel", null).show()
-    }
-    private fun pickPhoto() {
-        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }
-        startActivityForResult(i, 77)
-    }
-    @Deprecated("Use Activity Result API in a later update")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode,resultCode,data)
-        if (requestCode == 77 && resultCode == RESULT_OK) data?.data?.let { uri ->
-            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
-            prefs.edit().putString("home_photo",uri.toString()).apply()
-            status.text = "Gallery image selected"
-            home()
-            Toast.makeText(this,"Wallpaper applied to VEIL home",Toast.LENGTH_SHORT).show()
-        }
-    }
-    private fun chooseTheme() {
-        val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light","Ocean Blue","Forest","Sunset")
-        AlertDialog.Builder(this).setTitle(tr("Theme","Tema")).setItems(names) { _, i ->
-            prefs.edit().putString("theme",names[i]).apply()
-            buildBrowser()
-            Toast.makeText(this,names[i]+" applied",Toast.LENGTH_SHORT).show()
-        }.show()
-    }
-    private fun chooseAccent() {
-        val names = arrayOf("Silver","Ice Blue","Emerald","Amber","Rose")
-        AlertDialog.Builder(this).setTitle(tr("Accent","Warna aksen")).setItems(names) { _, i -> prefs.edit().putInt("accent",i).apply(); Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show() }.show()
-    }
-    private fun chooseSearch() {
-        val names = arrayOf("DuckDuckGo","Google","Bing","Brave Search")
-        val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
-        AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
-    }
-    private fun hostKey(origin: String): String =
-        runCatching { Uri.parse(origin).host?.lowercase(Locale.ROOT).orEmpty() }.getOrDefault("")
-
-    private fun handleWebPermissionRequest(request: PermissionRequest) {
-        val host = hostKey(request.origin.toString())
-        val resources = request.resources.filter {
-            it == PermissionRequest.RESOURCE_AUDIO_CAPTURE || it == PermissionRequest.RESOURCE_VIDEO_CAPTURE
-        }.toTypedArray()
-        if (host.isBlank() || resources.isEmpty() || resources.size != request.resources.size) {
-            request.deny()
-            return
-        }
-        val key = "site_media_" + host
-        when (prefs.getString(key, "ask")) {
-            "deny" -> { request.deny(); return }
-            "allow" -> { requestMediaAtOsLevel(request, resources); return }
-        }
-        val labels = resources.map {
-            if (it == PermissionRequest.RESOURCE_VIDEO_CAPTURE) "camera" else "microphone"
-        }.distinct().joinToString(" and ")
-        AlertDialog.Builder(this)
-            .setTitle("VEIL permission")
-            .setMessage("$host wants to use your $labels.")
-            .setPositiveButton("Allow for this site") { _, _ ->
-                prefs.edit().putString(key, "allow").apply()
-                requestMediaAtOsLevel(request, resources)
-            }
-            .setNegativeButton("Block") { _, _ ->
-                prefs.edit().putString(key, "deny").apply()
-                request.deny()
-            }
-            .setOnCancelListener { request.deny() }
-            .show()
-    }
-
-    private fun requestMediaAtOsLevel(request: PermissionRequest, resources: Array<String>) {
-        val required = mutableListOf<String>()
-        if (resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) required.add(Manifest.permission.CAMERA)
-        if (resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) required.add(Manifest.permission.RECORD_AUDIO)
-        val missing = required.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isEmpty()) {
-            runCatching { request.grant(resources) }.onFailure { request.deny() }
-            return
-        }
-        pendingMediaRequest?.deny()
-        pendingMediaRequest = request
-        pendingMediaResources = resources
-        requestPermissions(missing.toTypedArray(), REQUEST_MEDIA_PERMISSIONS)
-    }
-
-    private fun handleGeolocationRequest(origin: String, callback: GeolocationPermissions.Callback) {
-        val host = hostKey(origin)
-        if (host.isBlank()) { callback.invoke(origin, false, false); return }
-        when (prefs.getString("site_geo_" + host, "ask")) {
-            "deny" -> { callback.invoke(origin, false, false); return }
-            "allow" -> { requestLocationAtOsLevel(origin, callback); return }
-        }
-        AlertDialog.Builder(this)
-            .setTitle("VEIL location permission")
-            .setMessage("$host wants to access your device location.")
-            .setPositiveButton("Allow for this site") { _, _ ->
-                prefs.edit().putString("site_geo_" + host, "allow").apply()
-                requestLocationAtOsLevel(origin, callback)
-            }
-            .setNegativeButton("Block") { _, _ ->
-                prefs.edit().putString("site_geo_" + host, "deny").apply()
-                callback.invoke(origin, false, false)
-            }
-            .setOnCancelListener { callback.invoke(origin, false, false) }
-            .show()
-    }
-
-    private fun requestLocationAtOsLevel(origin: String, callback: GeolocationPermissions.Callback) {
-        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (fine || coarse) {
-            callback.invoke(origin, true, false)
-            return
-        }
-        pendingGeoCallback = callback
-        pendingGeoOrigin = origin
-        requestPermissions(
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-            REQUEST_LOCATION_PERMISSIONS
-        )
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_MEDIA_PERMISSIONS) {
-            val request = pendingMediaRequest
-            val granted = permissions.isNotEmpty() && grantResults.isNotEmpty() &&
-                permissions.indices.all { grantResults[it] == PackageManager.PERMISSION_GRANTED }
-            if (request != null) {
-                if (granted) runCatching { request.grant(pendingMediaResources) }.onFailure { request.deny() }
-                else request.deny()
-            }
-            pendingMediaRequest = null
-            pendingMediaResources = emptyArray()
-        } else if (requestCode == REQUEST_LOCATION_PERMISSIONS) {
-            val callback = pendingGeoCallback
-            val granted = permissions.indices.any {
-                (permissions[it] == Manifest.permission.ACCESS_FINE_LOCATION ||
-                    permissions[it] == Manifest.permission.ACCESS_COARSE_LOCATION) &&
-                    grantResults.getOrNull(it) == PackageManager.PERMISSION_GRANTED
-            }
-            callback?.invoke(pendingGeoOrigin, granted, false)
-            pendingGeoCallback = null
-            pendingGeoOrigin = ""
-        }
-    }
-
-    private fun applySiteJavaScript(host: String) {
-        if (!::web.isInitialized || host.isBlank()) return
-        web.settings.javaScriptEnabled = prefs.getString("site_js_" + host.lowercase(Locale.ROOT), "default") != "block"
-    }
-
-    private fun sitePermissions() {
-        val host = runCatching { Uri.parse(web.url ?: "").host ?: "" }.getOrDefault("")
-        if (host.isBlank()) { Toast.makeText(this, "Open a website first", Toast.LENGTH_SHORT).show(); return }
-        val jsKey = "site_js_" + host
-        val geoKey = "site_geo_" + host
-        val mediaKey = "site_media_" + host
-        val choices = arrayOf(
-            "JavaScript: allow", "JavaScript: block",
-            "Location: ask", "Location: allow", "Location: block",
-            "Camera & microphone: ask", "Camera & microphone: allow", "Camera & microphone: block",
-            "Notifications: unavailable in Android WebView", "Reset site settings"
-        )
-        AlertDialog.Builder(this).setTitle("Site permissions • " + host).setItems(choices) { _, index ->
-            when (index) {
-                0 -> prefs.edit().putString(jsKey, "default").apply()
-                1 -> prefs.edit().putString(jsKey, "block").apply()
-                2 -> prefs.edit().remove(geoKey).apply()
-                3 -> prefs.edit().putString(geoKey, "allow").apply()
-                4 -> prefs.edit().putString(geoKey, "deny").apply()
-                5 -> prefs.edit().remove(mediaKey).apply()
-                6 -> prefs.edit().putString(mediaKey, "allow").apply()
-                7 -> prefs.edit().putString(mediaKey, "deny").apply()
-                8 -> Toast.makeText(this, "Web notifications are not supported by this WebView implementation.", Toast.LENGTH_LONG).show()
-                9 -> prefs.edit().remove(jsKey).remove(geoKey).remove(mediaKey).apply()
-            }
-            applySiteJavaScript(host)
-            Toast.makeText(this, "Site preference saved. Reload the page to apply changes.", Toast.LENGTH_SHORT).show()
-        }.show()
-    }
-
-    private fun recordHistory(url: String) {
-        val old = prefs.getString("history", "") ?: ""
-        val updated = (listOf(url) + old.lines().filter { it.isNotBlank() && it != url }).take(500)
-        prefs.edit().putString("history", updated.joinToString("\n")).apply()
-    }
-
-    private fun showHistory() {
-        val history = (prefs.getString("history", "") ?: "").lines().filter { it.startsWith("http") }
-        if (history.isEmpty()) Toast.makeText(this, "No browsing history", Toast.LENGTH_SHORT).show()
-        else AlertDialog.Builder(this).setTitle(tr("Browsing history", "Riwayat penjelajahan"))
-            .setItems(history.toTypedArray()) { _, index -> navigate(history[index]) }
-            .setNeutralButton(tr("Clear history", "Hapus riwayat")) { _, _ -> prefs.edit().remove("history").apply() }
-            .setNegativeButton(tr("Close", "Tutup"), null).show()
-    }
-
-    private fun saveBookmark() {
-        val url = web.url ?: return
-        val old = prefs.getString("bookmarks","") ?: ""
-        prefs.edit().putString("bookmarks", (old + url + "\n").takeLast(12000)).apply()
-        Toast.makeText(this,"Bookmark saved locally",Toast.LENGTH_SHORT).show()
-    }
     private fun tabsDialog() {
-        val options = arrayOf("New tab", "Switch tab (" + tabs.size + ")", "Close current tab", "New isolated private session", "Show saved bookmarks")
-        AlertDialog.Builder(this).setTitle(tr("Tabs & library","Tab & pustaka")).setItems(options) { _, i ->
+        val options = arrayOf("New tab", "Switch tab • ${tabs.size}", "Close current tab", "New isolated private session", "Show saved bookmarks")
+        AlertDialog.Builder(this).setTitle("Tabs").setItems(options) { _, i ->
             when (i) {
-                0 -> {
-                    val next = createBrowserWebView()
-                    tabs.add(next); activeTab = tabs.lastIndex
-                    webHost.addView(next, FrameLayout.LayoutParams(-1, -1))
-                    showActiveTab()
-                    home()
-                }
+                0 -> newTab()
                 1 -> showTabPicker()
                 2 -> closeCurrentTab()
                 3 -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startActivity(Intent(this, PrivateActivity::class.java))
-                    else Toast.makeText(this, "Isolated private mode requires Android 9 or newer.", Toast.LENGTH_LONG).show()
+                    else Toast.makeText(this, "Private mode requires Android 9+", Toast.LENGTH_LONG).show()
                 }
                 4 -> showBookmarks()
             }
-        }.show()
-    }
-
-    private fun showActiveTab() {
-        tabs.forEachIndexed { index, tab -> tab.visibility = if (index == activeTab) android.view.View.VISIBLE else android.view.View.GONE }
-        web = tabs[activeTab]
-        address.setText(web.url ?: "")
-    }
-
-    private fun showTabPicker() {
-        if (tabs.isEmpty()) return
-        val names = tabs.mapIndexed { index, tab -> (index + 1).toString() + ". " + (tab.title?.take(45) ?: tab.url ?: "New tab") }
-        AlertDialog.Builder(this).setTitle("Open tab").setItems(names.toTypedArray()) { _, index ->
-            activeTab = index
-            showActiveTab()
         }.setNegativeButton("Close", null).show()
     }
 
-    private fun closeCurrentTab() {
-        if (tabs.size <= 1) {
-            web.loadUrl("about:blank")
-            home()
-            return
-        }
-        val closing = tabs.removeAt(activeTab)
-        webHost.removeView(closing)
-        closing.stopLoading()
-        closing.destroy()
-        activeTab = (activeTab - 1).coerceAtLeast(0)
-        showActiveTab()
-    }
-    private fun showBookmarks() {
-        val list = (prefs.getString("bookmarks","") ?: "").lines().filter { it.startsWith("http") }.distinct()
-        if (list.isEmpty()) Toast.makeText(this,"No bookmarks saved",Toast.LENGTH_SHORT).show()
-        else AlertDialog.Builder(this).setTitle("Bookmarks").setItems(list.toTypedArray()) { _, i -> navigate(list[i]) }.setNegativeButton("Close",null).show()
-    }
-    private fun clearData() {
-        web.clearHistory(); web.clearCache(true); web.clearFormData()
-        CookieManager.getInstance().removeAllCookies(null); CookieManager.getInstance().flush()
-        prefs.edit().remove("bookmarks").remove("history").apply()
-        Toast.makeText(this,"Local browser data cleared",Toast.LENGTH_SHORT).show()
-    }
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() { if (::web.isInitialized && web.canGoBack()) web.goBack() else home() }
-    override fun onDestroy() {
-        pendingMediaRequest?.deny()
-        pendingMediaRequest = null
-        pendingGeoCallback?.invoke(pendingGeoOrigin, false, false)
-        pendingGeoCallback = null
-        if (::web.isInitialized) { tabs.forEach { it.stopLoading(); it.destroy() }; tabs.clear() }
-        super.onDestroy()
-    }
 
-    companion object {
-        private const val REQUEST_MEDIA_PERMISSIONS = 810
-        private const val REQUEST_LOCATION_PERMISSIONS = 811
-    }
-}
