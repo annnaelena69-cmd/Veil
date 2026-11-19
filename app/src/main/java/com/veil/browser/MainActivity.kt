@@ -166,7 +166,7 @@ class MainActivity : Activity() {
             }
         }
         address = EditText(this).apply {
-            isSingleLine = true; textSize = 14f; setTextColor(foreground); setHintTextColor(Color.GRAY)
+            isSingleLine = true; textSize = 14f; setTextColor(this@MainActivity.foreground); setHintTextColor(Color.GRAY)
             hint = tr("Search or enter address", "Cari atau masukkan alamat")
             setPadding(dp(4), dp(4), dp(4), dp(4)); setBackgroundColor(Color.TRANSPARENT)
             imeOptions = EditorInfo.IME_ACTION_GO
