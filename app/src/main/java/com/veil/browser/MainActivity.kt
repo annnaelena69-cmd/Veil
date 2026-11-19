@@ -73,6 +73,8 @@ class MainActivity : Activity() {
     private lateinit var webHost: FrameLayout
     private var cachedFilterEngine: FilterEngine? = null
     private var cachedFilterStamp: Long = -1L
+    private var cachedBlockedDomains: Set<String> = emptySet()
+    private var cachedScriptletEngine: ScriptletEngine? = null
     private var pendingMediaRequest: PermissionRequest? = null
     private var pendingMediaResources: Array<String> = emptyArray()
     private var pendingGeoCallback: GeolocationPermissions.Callback? = null
@@ -84,6 +86,8 @@ class MainActivity : Activity() {
             val rules = (prefs.getString("downloaded_filter_rules", "") ?: "").lines().filter { it.isNotBlank() }
             val legacy = (prefs.getString("downloaded_block_domains", "") ?: "").lines().filter { it.isNotBlank() }.map { "||" + it + "^" }
             cachedFilterEngine = FilterEngine(rules + legacy)
+            cachedBlockedDomains = (prefs.getString("downloaded_block_domains", "") ?: "").lineSequence().filter { it.isNotBlank() }.toSet()
+            cachedScriptletEngine = ScriptletEngine(rules)
             cachedFilterStamp = stamp
         }
         return cachedFilterEngine!!
@@ -91,7 +95,7 @@ class MainActivity : Activity() {
 
     // VEIL v1 starts with 50 language choices. Translation coverage is tracked separately.
     private val languageCodes = listOf(
-        "en","id","ms","zh","zh-TW","ja","ko","hi","bn","ur","ar","fa","he","th","vi","tl","ta","te","ml","kn","mr","gu","pa","ne","si","my","km","lo","fr","de","es","pt","it","nl","sv","no","da","fi","pl","cs","sk","hu","ro","bg","el","ru","uk","tr","sw","am"
+        "en","id","ms","zh","ja","ko","es","fr","de","ar"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -377,8 +381,7 @@ class MainActivity : Activity() {
                     super.onPageStarted(view, url, favicon)
                     if (view === web) url?.let { address.setText(it) }
                     if (url != null && url.startsWith("http")) {
-                        val filterLines = (prefs.getString("downloaded_filter_rules", "") ?: "").lines()
-                        val scriptlets = ScriptletEngine(filterLines).scriptFor(url)
+                        val scriptlets = (cachedScriptletEngine ?: ScriptletEngine(emptyList())).scriptFor(url)
                         if (scriptlets.isNotBlank()) view?.evaluateJavascript(scriptlets, null)
                     }
                 }
@@ -417,8 +420,8 @@ class MainActivity : Activity() {
         val rules = when (mode) { "strong" -> strong; "super" -> superBlock; else -> standard }
         val allowed = (prefs.getString("allowed_filter_domains", "") ?: "").split('\n').filter { it.isNotBlank() }
         if (allowed.any { host == it || host.endsWith(".$it") }) return false
-        val downloaded = (prefs.getString("downloaded_block_domains", "") ?: "").split('\n').filter { it.isNotBlank() }
-        return (rules + downloaded).any { host == it || host.endsWith(".$it") }
+        return rules.any { host == it || host.endsWith(".$it") } ||
+            cachedBlockedDomains.any { host == it || host.endsWith(".$it") }
     }
 
     private fun home() {
@@ -452,6 +455,8 @@ class MainActivity : Activity() {
             }
         }.getOrNull()
         val backgroundCss = if (photoData != null) "background-image:linear-gradient(rgba(12,12,16,.52),rgba(12,12,16,.72)),url('$photoData');background-size:cover;background-position:center;" else "background:$bg;"
+        val searchPrefix = prefs.getString("search_engine", "https://duckduckgo.com/?q=") ?: "https://duckduckgo.com/?q="
+        val searchPrefixJs = org.json.JSONObject.quote(searchPrefix)
         val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
         <style>
         *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Arial,sans-serif;color:$fg}
@@ -478,7 +483,7 @@ class MainActivity : Activity() {
           var field=document.getElementById('q');
           var value=field.value.trim();
           if(!value)return;
-          window.location.href='veilsearch://search?q='+encodeURIComponent(value);
+          window.location.href=$searchPrefixJs+encodeURIComponent(value);
         }
         </script>
         </body></html>"""
