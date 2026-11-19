@@ -19,10 +19,10 @@ A privacy-focused Android browser prototype built with Kotlin and Android WebVie
 VEIL is not a finished, audited, or production-ready privacy browser.
 
 ### Ad blocking
-The current filter implementation extracts hostname rules and some hostname exceptions from EasyList and EasyPrivacy. It does **not** implement the complete Adblock Plus filter syntax, cosmetic selectors, scriptlets, request-type matching, redirect rules, or all exception semantics. It cannot reliably block first-party ads and is not equivalent to Brave Shields or uBlock Origin. The project does not claim better blocking than Brave.
+The current filter implementation extracts hostname rules and some hostname exceptions from EasyList and EasyPrivacy. It does **not** implement the complete Adblock Plus filter syntax, full cosmetic-filter semantics, complete scriptlet coverage, request-type matching, redirect rules, or all exception semantics. A conservative `set-constant` scriptlet subset is supported; unknown scriptlets are ignored and filter text is never evaluated as arbitrary JavaScript. It cannot reliably block first-party ads and is not equivalent to Brave Shields or uBlock Origin. The project does not claim better blocking than Brave.
 
 ### Localization
-The app currently offers 100 locale choices, but complete translation of every menu, dialog, and status message into all 100 languages is not implemented. English and Indonesian have partial UI strings; other languages currently fall back to English.
+The app currently offers 100 locale choices, but complete translation of every menu, dialog, and status message into all 100 languages is not implemented. English and Indonesian remain the only partially localized UI languages; other languages fall back to English. English and Indonesian have partial UI strings; other languages currently fall back to English.
 
 ### Privacy and tabs
 Normal tabs use separate WebView instances but share the normal browser profile and cookies. Private browsing uses a separate WebView data directory on Android 9+ and clears that profile on close. This is not a guarantee of anonymity: websites and network providers can still observe connection data.
