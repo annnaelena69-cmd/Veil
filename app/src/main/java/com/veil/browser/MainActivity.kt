@@ -17,6 +17,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
+import android.widget.FrameLayout
 import android.util.Base64
 import java.io.ByteArrayInputStream
 import java.net.URLEncoder
@@ -33,8 +34,9 @@ class MainActivity : Activity() {
     private val black = Color.rgb(4, 4, 5)
     private val panel = Color.rgb(19, 19, 22)
     private val foreground = Color.rgb(240, 240, 244)
-    private val tabs = mutableListOf<String>()
-    private var privateMode = false
+    private val tabs = mutableListOf<WebView>()
+    private var activeTab = 0
+    private lateinit var webHost: FrameLayout
 
     private val languageCodes = listOf(
         "en","id","ar","bn","bg","ca","zh","zh-TW","hr","cs","da","nl","et","fi","fr","de","el","gu","he","hi",
@@ -106,38 +108,13 @@ class MainActivity : Activity() {
         header.addView(action("GO") { navigate(address.text.toString()) })
         root.addView(header)
 
-        web = WebView(this).apply {
-            setBackgroundColor(black)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.loadsImagesAutomatically = true
-            settings.javaScriptCanOpenWindowsAutomatically = false
-            settings.setSupportMultipleWindows(false)
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-            webChromeClient = WebChromeClient()
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    val uri = request?.url ?: return false
-                    if (uri.scheme == "https" || uri.scheme == "http") { address.setText(uri.toString()); return false }
-                    return true
-                }
-                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val host = request?.url?.host?.lowercase(Locale.ROOT) ?: return null
-                    val mode = prefs.getString("block_level", "standard") ?: "standard"
-                    if (blocked(host, mode)) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by VEIL", emptyMap(), ByteArrayInputStream(ByteArray(0)))
-                    return super.shouldInterceptRequest(view, request)
-                }
-                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                    super.onPageStarted(view, url, favicon); url?.let { address.setText(it) }
-                }
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url); status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
-                }
-            }
-        }
-        root.addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
+        webHost = FrameLayout(this)
+        tabs.clear()
+        web = createBrowserWebView()
+        tabs.add(web)
+        activeTab = 0
+        webHost.addView(web, FrameLayout.LayoutParams(-1, -1))
+        root.addView(webHost, LinearLayout.LayoutParams(-1, 0, 1f))
         status = label("Private by design", 11f).apply { gravity = Gravity.START }
         root.addView(status)
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(panel) }
@@ -159,6 +136,41 @@ class MainActivity : Activity() {
         root.addView(nav)
         setContentView(root)
         home()
+    }
+
+
+    private fun createBrowserWebView(): WebView {
+        return WebView(this).apply {
+            setBackgroundColor(black)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            settings.setSupportMultipleWindows(false)
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+            webChromeClient = WebChromeClient()
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val uri = request?.url ?: return false
+                    if (uri.scheme == "https" || uri.scheme == "http") { if (view === web) address.setText(uri.toString()); return false }
+                    return true
+                }
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                    val host = request?.url?.host?.lowercase(Locale.ROOT) ?: return null
+                    val mode = prefs.getString("block_level", "standard") ?: "standard"
+                    if (blocked(host, mode)) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by VEIL", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+                    return super.shouldInterceptRequest(view, request)
+                }
+                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                    super.onPageStarted(view, url, favicon); if (view === web) url?.let { address.setText(it) }
+                }
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url); if (view === web && ::status.isInitialized) status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
+                }
+            }
+        }
     }
 
     private fun blocked(host: String, mode: String): Boolean {
@@ -302,15 +314,51 @@ class MainActivity : Activity() {
         Toast.makeText(this,"Bookmark saved locally",Toast.LENGTH_SHORT).show()
     }
     private fun tabsDialog() {
-        val options = arrayOf("New tab","Private browsing","Close current tab","Show saved bookmarks")
+        val options = arrayOf("New tab", "Switch tab (" + tabs.size + ")", "Close current tab", "New isolated private session", "Show saved bookmarks")
         AlertDialog.Builder(this).setTitle(tr("Tabs & library","Tab & pustaka")).setItems(options) { _, i ->
-            when(i) {
-                0 -> { tabs.add("about:blank"); home() }
-                1 -> { privateMode = true; web.clearHistory(); web.clearCache(true); home(); Toast.makeText(this,"Private session started in this tab",Toast.LENGTH_SHORT).show() }
-                2 -> home()
-                3 -> showBookmarks()
+            when (i) {
+                0 -> {
+                    val next = createBrowserWebView()
+                    tabs.add(next); activeTab = tabs.lastIndex
+                    webHost.addView(next, FrameLayout.LayoutParams(-1, -1))
+                    showActiveTab()
+                    home()
+                }
+                1 -> showTabPicker()
+                2 -> closeCurrentTab()
+                3 -> startActivity(Intent(this, PrivateActivity::class.java))
+                4 -> showBookmarks()
             }
         }.show()
+    }
+
+    private fun showActiveTab() {
+        tabs.forEachIndexed { index, tab -> tab.visibility = if (index == activeTab) android.view.View.VISIBLE else android.view.View.GONE }
+        web = tabs[activeTab]
+        address.setText(web.url ?: "")
+    }
+
+    private fun showTabPicker() {
+        if (tabs.isEmpty()) return
+        val names = tabs.mapIndexed { index, tab -> (index + 1).toString() + ". " + (tab.title?.take(45) ?: tab.url ?: "New tab") }
+        AlertDialog.Builder(this).setTitle("Open tab").setItems(names.toTypedArray()) { _, index ->
+            activeTab = index
+            showActiveTab()
+        }.setNegativeButton("Close", null).show()
+    }
+
+    private fun closeCurrentTab() {
+        if (tabs.size <= 1) {
+            web.loadUrl("about:blank")
+            home()
+            return
+        }
+        val closing = tabs.removeAt(activeTab)
+        webHost.removeView(closing)
+        closing.stopLoading()
+        closing.destroy()
+        activeTab = (activeTab - 1).coerceAtLeast(0)
+        showActiveTab()
     }
     private fun showBookmarks() {
         val list = (prefs.getString("bookmarks","") ?: "").lines().filter { it.startsWith("http") }.distinct()
@@ -325,5 +373,5 @@ class MainActivity : Activity() {
     }
     @Suppress("DEPRECATION")
     override fun onBackPressed() { if (::web.isInitialized && web.canGoBack()) web.goBack() else home() }
-    override fun onDestroy() { if (::web.isInitialized) { web.stopLoading(); web.destroy() }; super.onDestroy() }
+    override fun onDestroy() { if (::web.isInitialized) { tabs.forEach { it.stopLoading(); it.destroy() }; tabs.clear() }; super.onDestroy() }
 }
