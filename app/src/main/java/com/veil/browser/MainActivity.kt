@@ -299,7 +299,7 @@ class MainActivity : Activity() {
             tr("Choose homepage photo from Gallery","Pilih foto halaman utama dari Galeri"),
             tr("Theme: Obsidian / Midnight / Light","Tema: Obsidian / Gelap / Terang"),
             tr("Accent color","Warna aksen"), tr("Search engine","Mesin pencari"),
-            tr("App language (100 languages)","Bahasa aplikasi (100 bahasa)"),
+            tr("App language (100 locale choices)","Pilihan bahasa aplikasi (100 opsi lokal)"),
             tr("Browsing history","Riwayat penjelajahan"), tr("Site permissions","Izin situs"), tr("Clear browsing data","Hapus data penjelajahan"), tr("About & privacy","Tentang & privasi")
         )
         AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
