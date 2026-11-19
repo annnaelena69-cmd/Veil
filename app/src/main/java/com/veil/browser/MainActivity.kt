@@ -394,6 +394,7 @@ class MainActivity : Activity() {
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    if (view === web && url?.startsWith("https://veil.local/") == true) installHomeBridge(view)
                     if (url != null && url.startsWith("http")) recordHistory(url)
                     if (view === web && url != null && ::address.isInitialized) address.setText(url)
                     if (view === web && url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
@@ -485,9 +486,20 @@ class MainActivity : Activity() {
         }
         </script>
         </body></html>"""
+        installHomeBridge(web)
         web.loadDataWithBaseURL("https://veil.local/", html, "text/html", "UTF-8", null)
         address.setText("")
         address.hint = tr("Search or enter address", "Cari atau masukkan alamat")
+    }
+
+    private fun installHomeBridge(target: WebView) {
+        target.removeJavascriptInterface("VEIL")
+        target.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun search(query: String) {
+                runOnUiThread { navigate(query) }
+            }
+        }, "VEIL")
     }
 
     private fun navigate(raw: String) {
@@ -500,6 +512,7 @@ class MainActivity : Activity() {
             q = engine + URLEncoder.encode(q, "UTF-8")
         }
         runCatching {
+            web.removeJavascriptInterface("VEIL")
             web.stopLoading()
             web.loadUrl(q)
             address.clearFocus()
