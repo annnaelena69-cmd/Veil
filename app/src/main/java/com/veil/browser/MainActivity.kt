@@ -459,17 +459,9 @@ class MainActivity : Activity() {
 
     private fun home() {
         if (!::web.isInitialized) return
-        val bg = when (prefs.getString("theme", "Obsidian Full Black")) {
-            "Midnight Dark" -> "#11131b"
-            "Minimal Grey" -> "#222226"
-            "Light" -> "#f0f0f4"
-            "Ocean Blue" -> "#081b2c"
-            "Forest" -> "#10231d"
-            "Sunset" -> "#24191d"
-            else -> "#19191e"
-        }
-        val fg = if (prefs.getString("theme", "Obsidian Full Black") == "Light") "#202027" else "#f5f5f7"
-        val accent = String.format("#%06X", 0xFFFFFF and accentColor)
+        val bg = "#19191e"
+        val fg = "#f5f5f7"
+        val accent = "#aeb5c2"
         val photoData = runCatching {
             val raw = prefs.getString("home_photo", null) ?: return@runCatching null
             val uri = Uri.parse(raw)
@@ -488,7 +480,7 @@ class MainActivity : Activity() {
             }
         }.getOrNull()
         val backgroundCss = if (photoData != null) "background-image:linear-gradient(rgba(12,12,16,.52),rgba(12,12,16,.72)),url('$photoData');background-size:cover;background-position:center;" else "background:$bg;"
-        val searchPrefix = prefs.getString("search_engine", "https://duckduckgo.com/?q=") ?: "https://duckduckgo.com/?q="
+        val searchPrefix = prefs.getString("search_engine", "https://search.brave.com/search?q=") ?: "https://search.brave.com/search?q="
         val searchPrefixJs = org.json.JSONObject.quote(searchPrefix)
         val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
         <style>
@@ -531,7 +523,7 @@ class MainActivity : Activity() {
         if (prefs.getBoolean("https_only", true) && q.startsWith("http://", true)) q = "https://" + q.removePrefix("http://")
         if (!q.contains("://") && q.contains(".") && !q.contains(" ")) q = "https://$q"
         else if (!q.startsWith("https://") && !q.startsWith("http://")) {
-            val engine = prefs.getString("search_engine", "https://duckduckgo.com/?q=") ?: "https://duckduckgo.com/?q="
+            val engine = prefs.getString("search_engine", "https://search.brave.com/search?q=") ?: "https://search.brave.com/search?q="
             q = engine + URLEncoder.encode(q, "UTF-8")
         }
         runCatching {
@@ -620,9 +612,7 @@ class MainActivity : Activity() {
             SettingEntry("PRIVACY & SECURITY", "Clear browsing data", "History, cookies, cache and site data") { clearData() },
             SettingEntry("GENERAL", "Search engine", "Choose your default search provider") { chooseSearch() },
             SettingEntry("GENERAL", "Homepage wallpaper", "Choose a photo from your gallery") { pickPhoto() },
-            SettingEntry("APPEARANCE", "Theme", prefs.getString("theme", "Obsidian Full Black") ?: "Obsidian Full Black") { chooseTheme() },
-            SettingEntry("APPEARANCE", "Accent color", "Customize VEIL highlights") { chooseAccent() },
-            SettingEntry("APPEARANCE", "App language", "50 language choices • translations are still expanding") { chooseLanguage() },
+            SettingEntry("APPEARANCE", "App language", "10 language choices") { chooseLanguage() },
             SettingEntry("YOUR DATA", "Bookmarks", "Manage saved pages") { showBookmarks() },
             SettingEntry("YOUR DATA", "History", "View visited pages") { showHistory() },
             SettingEntry("ABOUT", "About VEIL", "Privacy information and current feature support") {
@@ -806,21 +796,9 @@ class MainActivity : Activity() {
             Toast.makeText(this,"Wallpaper applied to VEIL home",Toast.LENGTH_SHORT).show()
         }
     }
-    private fun chooseTheme() {
-        val names = arrayOf("Obsidian Full Black","Midnight Dark","Minimal Grey","Light","Ocean Blue","Forest","Sunset")
-        AlertDialog.Builder(this).setTitle(tr("Theme","Tema")).setItems(names) { _, i ->
-            prefs.edit().putString("theme",names[i]).apply()
-            buildBrowser()
-            Toast.makeText(this,names[i]+" applied",Toast.LENGTH_SHORT).show()
-        }.show()
-    }
-    private fun chooseAccent() {
-        val names = arrayOf("Silver","Ice Blue","Emerald","Amber","Rose")
-        AlertDialog.Builder(this).setTitle(tr("Accent","Warna aksen")).setItems(names) { _, i -> prefs.edit().putInt("accent",i).apply(); Toast.makeText(this,names[i]+" saved",Toast.LENGTH_SHORT).show() }.show()
-    }
     private fun chooseSearch() {
-        val names = arrayOf("DuckDuckGo","Google","Bing","Brave Search")
-        val urls = arrayOf("https://duckduckgo.com/?q=","https://www.google.com/search?q=","https://www.bing.com/search?q=","https://search.brave.com/search?q=")
+        val names = arrayOf("Brave Search (default)","Google","DuckDuckGo","Bing")
+        val urls = arrayOf("https://search.brave.com/search?q=","https://www.google.com/search?q=","https://duckduckgo.com/?q=","https://www.bing.com/search?q=")
         AlertDialog.Builder(this).setTitle(tr("Search engine","Mesin pencari")).setItems(names) { _, i -> prefs.edit().putString("search_engine",urls[i]).apply() }.show()
     }
     private fun hostKey(origin: String): String =
