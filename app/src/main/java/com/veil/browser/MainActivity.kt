@@ -509,63 +509,142 @@ class MainActivity : Activity() {
     }
 
     private fun settings() {
-        val items = arrayOf(
-            "AdBlock level • Standard / Strong / Super",
-            "Update EasyList + EasyPrivacy",
-            "Filter engine status",
-            "Tracker protection: " + if (prefs.getBoolean("tracker_protection", true)) "ON" else "OFF",
-            "Block third-party cookies: " + if (prefs.getBoolean("block_third_party_cookies", true)) "ON" else "OFF",
-            "HTTPS-only mode: " + if (prefs.getBoolean("https_only", true)) "ON" else "OFF",
-            "Private DNS / DNS settings",
-            "Site permissions",
-            "App language • 50 choices",
-            "Homepage wallpaper",
-            "Theme",
-            "Accent color",
-            "Search engine",
-            "Browsing history",
-            "Clear browsing data",
-            "About VEIL & privacy"
-        )
-        AlertDialog.Builder(this).setTitle(tr("VEIL Settings","Pengaturan VEIL")).setItems(items) { _, which ->
-            when (which) {
-                0 -> chooseBlock()
-                1 -> refreshFilters(force = true)
-                2 -> showFilterStatus()
-                3 -> {
-                    val enabled = !prefs.getBoolean("tracker_protection", true)
-                    prefs.edit().putBoolean("tracker_protection", enabled).apply()
-                    settings()
-                    Toast.makeText(this, "Tracker protection " + if (enabled) "enabled" else "disabled", Toast.LENGTH_SHORT).show()
-                }
-                4 -> {
-                    val enabled = !prefs.getBoolean("block_third_party_cookies", true)
-                    prefs.edit().putBoolean("block_third_party_cookies", enabled).apply()
-                    tabs.forEach { CookieManager.getInstance().setAcceptThirdPartyCookies(it, !enabled) }
-                    settings()
-                }
-                5 -> {
-                    val enabled = !prefs.getBoolean("https_only", true)
-                    prefs.edit().putBoolean("https_only", enabled).apply()
-                    tabs.forEach { tab ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            tab.settings.mixedContentMode = if (enabled) android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW else android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        }
-                    }
-                    settings()
-                }
-                6 -> dnsSettings()
-                7 -> sitePermissions()
-                8 -> chooseLanguage()
-                9 -> pickPhoto()
-                10 -> chooseTheme()
-                11 -> chooseAccent()
-                12 -> chooseSearch()
-                13 -> showHistory()
-                14 -> clearData()
-                15 -> AlertDialog.Builder(this).setTitle("VEIL privacy").setMessage("VEIL stores settings locally and includes no account or analytics SDK. EasyList and EasyPrivacy support is still a partial ABP implementation, not full uBlock Origin or Brave-level protection. HTTPS-only mode upgrades typed HTTP URLs and blocks mixed content; some sites may not work. Private DNS is configured in Android system settings and applies device-wide.").setPositiveButton("OK", null).show()
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(black)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            setBackgroundColor(black)
+        }
+        val back = TextView(this).apply {
+            text = "‹"
+            textSize = 32f
+            setTextColor(foreground)
+            gravity = Gravity.CENTER
+            setOnClickListener { buildBrowser() }
+        }
+        header.addView(back, LinearLayout.LayoutParams(dp(44), dp(48)))
+        header.addView(TextView(this).apply {
+            text = tr("Settings", "Pengaturan")
+            textSize = 22f
+            setTextColor(foreground)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        page.addView(header)
+
+        val search = EditText(this).apply {
+            hint = tr("Search settings", "Cari pengaturan")
+            textSize = 15f
+            setTextColor(foreground)
+            setHintTextColor(Color.GRAY)
+            setSingleLine(true)
+            setPadding(dp(16), 0, dp(16), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(panel)
+                cornerRadius = dp(18).toFloat()
             }
-        }.show()
+        }
+        val searchWrap = LinearLayout(this).apply {
+            setPadding(dp(16), dp(4), dp(16), dp(14))
+            addView(search, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+        page.addView(searchWrap)
+
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), 0, dp(14), dp(24))
+        }
+        scroll.addView(content)
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        data class SettingEntry(val section: String, val title: String, val summary: String, val action: () -> Unit)
+        val entries = listOf(
+            SettingEntry("VEIL SHIELDS", "Ad & tracker blocking", "Choose Standard, Strong or Super blocking") { chooseBlock() },
+            SettingEntry("VEIL SHIELDS", "Filter lists", "Update EasyList and EasyPrivacy") { refreshFilters(force = true) },
+            SettingEntry("VEIL SHIELDS", "Filter engine status", "View loaded rules and last update") { showFilterStatus() },
+            SettingEntry("PRIVACY & SECURITY", "Tracker protection", if (prefs.getBoolean("tracker_protection", true)) "On • reduce cross-site tracking" else "Off") {
+                val v = !prefs.getBoolean("tracker_protection", true); prefs.edit().putBoolean("tracker_protection", v).apply(); settings()
+            },
+            SettingEntry("PRIVACY & SECURITY", "Block third-party cookies", if (prefs.getBoolean("block_third_party_cookies", true)) "On • block third-party cookies" else "Off") {
+                val v = !prefs.getBoolean("block_third_party_cookies", true); prefs.edit().putBoolean("block_third_party_cookies", v).apply()
+                tabs.forEach { CookieManager.getInstance().setAcceptThirdPartyCookies(it, !v) }; settings()
+            },
+            SettingEntry("PRIVACY & SECURITY", "HTTPS-only mode", if (prefs.getBoolean("https_only", true)) "On • prefer secure connections" else "Off") {
+                val v = !prefs.getBoolean("https_only", true); prefs.edit().putBoolean("https_only", v).apply()
+                tabs.forEach { it.settings.mixedContentMode = if (v) android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW else android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE }; settings()
+            },
+            SettingEntry("PRIVACY & SECURITY", "Site permissions", "Camera, microphone and location") { sitePermissions() },
+            SettingEntry("PRIVACY & SECURITY", "Private DNS", "Choose a DNS-over-TLS provider") { dnsSettings() },
+            SettingEntry("PRIVACY & SECURITY", "Clear browsing data", "History, cookies, cache and site data") { clearData() },
+            SettingEntry("GENERAL", "Search engine", "Choose your default search provider") { chooseSearch() },
+            SettingEntry("GENERAL", "Homepage wallpaper", "Choose a photo from your gallery") { pickPhoto() },
+            SettingEntry("APPEARANCE", "Theme", prefs.getString("theme", "Obsidian Full Black") ?: "Obsidian Full Black") { chooseTheme() },
+            SettingEntry("APPEARANCE", "Accent color", "Customize VEIL highlights") { chooseAccent() },
+            SettingEntry("APPEARANCE", "App language", "50 language choices • translations are still expanding") { chooseLanguage() },
+            SettingEntry("YOUR DATA", "Bookmarks", "Manage saved pages") { showBookmarks() },
+            SettingEntry("YOUR DATA", "History", "View visited pages") { showHistory() },
+            SettingEntry("ABOUT", "About VEIL", "Privacy information and current feature support") {
+                AlertDialog.Builder(this).setTitle("About VEIL").setMessage("VEIL stores settings locally and includes no account or analytics SDK. Ad and tracker filtering currently supports an ABP subset, not full Brave-level protection. Private DNS opens Android system settings and applies device-wide.").setPositiveButton("OK", null).show()
+            }
+        )
+
+        fun render(query: String = "") {
+            content.removeAllViews()
+            var lastSection = ""
+            entries.filter { (it.title + " " + it.summary + " " + it.section).contains(query, true) }.forEach { entry ->
+                if (entry.section != lastSection) {
+                    val section = TextView(this).apply {
+                        text = entry.section
+                        textSize = 12f
+                        setTextColor(accentColor)
+                        setTypeface(null, android.graphics.Typeface.BOLD)
+                        setPadding(dp(8), dp(18), dp(8), dp(8))
+                    }
+                    content.addView(section)
+                    lastSection = entry.section
+                }
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(15), dp(13), dp(15), dp(13))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(panel)
+                        cornerRadius = dp(15).toFloat()
+                    }
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { entry.action() }
+                }
+                card.addView(TextView(this).apply {
+                    text = entry.title
+                    textSize = 16f
+                    setTextColor(foreground)
+                    setTypeface(null, android.graphics.Typeface.MEDIUM)
+                })
+                card.addView(TextView(this).apply {
+                    text = entry.summary
+                    textSize = 13f
+                    setTextColor(if (prefs.getString("theme", "") == "Light") Color.DKGRAY else Color.LTGRAY)
+                    setPadding(0, dp(4), 0, 0)
+                })
+                val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
+                content.addView(card, lp)
+            }
+            if (content.childCount == 0) content.addView(TextView(this).apply {
+                text = tr("No settings found", "Pengaturan tidak ditemukan")
+                setTextColor(foreground); setPadding(dp(12), dp(24), dp(12), dp(24))
+            })
+        }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { render(s?.toString().orEmpty()) }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        render()
+        setContentView(page)
     }
 
     private fun showFilterStatus() {
