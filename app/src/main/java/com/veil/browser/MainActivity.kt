@@ -235,6 +235,9 @@ class MainActivity : Activity() {
                             val safeCss = css.replace("\\", "\\\\").replace("'", "\\'")
                             view?.evaluateJavascript("(function(){var s=document.createElement('style');s.textContent='$safeCss{display:none!important}';(document.head||document.documentElement).appendChild(s);})();", null)
                         }
+                        val filterLines = (prefs.getString("downloaded_filter_rules", "") ?: "").lines()
+                        val scriptlets = ScriptletEngine(filterLines).scriptFor(url)
+                        if (scriptlets.isNotBlank()) view?.evaluateJavascript(scriptlets, null)
                     }
                     if (view === web && ::status.isInitialized) status.text = "VEIL protection • " + (prefs.getString("block_level", "standard") ?: "standard").uppercase()
                 }
