@@ -4,9 +4,9 @@ import android.net.Uri
 import java.util.Locale
 
 /**
- * Small, deterministic ABP subset for Android WebView.
- * Supports domain anchors, wildcards, exceptions, domain scopes and common resource options.
- * Unsupported advanced ABP syntax is ignored rather than interpreted unsafely.
+ * ABP-compatible subset for Android WebView.
+ * Unknown options and advanced filter families are ignored safely.
+ * This is not a complete ABP implementation.
  */
 class FilterEngine(lines: Collection<String>) {
     private data class Rule(
@@ -17,17 +17,26 @@ class FilterEngine(lines: Collection<String>) {
         val resourceTypes: Set<String>,
         val excludedTypes: Set<String>,
         val thirdParty: Boolean?,
-        val matchCase: Boolean
+        val matchCase: Boolean,
+        val exceptionOptions: Set<String>,
+        val generic: Boolean
     )
 
-    private val rules: List<Rule> = lines.mapNotNull { parse(it) }
-    private val cosmetic = mutableMapOf<String, MutableList<String>>()
-    private val genericCosmetic = mutableListOf<String>()
+    private data class CosmeticRule(
+        val includeDomains: Set<String>,
+        val excludeDomains: Set<String>,
+        val selector: String,
+        val generic: Boolean
+    )
+
+    private val rules = lines.mapNotNull(::parseNetworkRule)
+    private val cosmeticRules = mutableListOf<CosmeticRule>()
+    private val cosmeticExceptions = mutableListOf<CosmeticRule>()
 
     init {
         lines.forEach { raw ->
             val line = raw.trim()
-            if (line.startsWith("!") || line.startsWith("[") || line.isEmpty()) return@forEach
+            if (line.isEmpty() || line.startsWith("!") || line.startsWith("[")) return@forEach
             val marker = when {
                 line.contains("#@#") -> "#@#"
                 line.contains("##") -> "##"
@@ -35,115 +44,168 @@ class FilterEngine(lines: Collection<String>) {
             } ?: return@forEach
             val parts = line.split(marker, limit = 2)
             if (parts.size != 2) return@forEach
-            val domains = parts[0].split(',').map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotBlank() }
             val selector = parts[1].trim()
-            if (selector.isBlank() || selector.startsWith("+js(")) return@forEach
-            if (marker == "##") {
-                if (domains.isEmpty()) genericCosmetic.add(selector)
-                else domains.forEach { cosmetic.getOrPut(it) { mutableListOf() }.add(selector) }
-            }
+            if (selector.isEmpty() || selector.startsWith("+js(") || selector.contains(":-abp-") ||
+                selector.contains(":has-text(") || selector.contains(":xpath(")) return@forEach
+            if (selector.length > 500 || selector.contains("</style", true)) return@forEach
+            val (include, exclude) = parseDomainList(parts[0].split(','))
+            val rule = CosmeticRule(include, exclude, selector, include.isEmpty() && exclude.isEmpty())
+            if (marker == "#@#") cosmeticExceptions.add(rule) else cosmeticRules.add(rule)
         }
     }
 
     fun shouldBlock(url: String, pageUrl: String?, isMainFrame: Boolean, accept: String?): Boolean {
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(Locale.ROOT) ?: return false
-        val pageHost = runCatching { Uri.parse(pageUrl ?: "").host?.lowercase(Locale.ROOT) }.getOrNull()
-        val thirdParty = pageHost != null && !hostMatches(host, pageHost) && !hostMatches(pageHost, host)
-        val type = when {
-            isMainFrame -> "document"
-            accept?.contains("image", true) == true -> "image"
-            accept?.contains("font", true) == true -> "font"
-            accept?.contains("text/css", true) == true -> "stylesheet"
-            else -> "other"
-        }
+        val pageHost = runCatching {
+            Uri.parse(if (isMainFrame) url else pageUrl ?: "").host?.lowercase(Locale.ROOT)
+        }.getOrNull().orEmpty()
+        if (pageHost.isNotEmpty() && hasPageException(pageHost, "document")) return false
+        val thirdParty = pageHost.isNotEmpty() && !sameSite(host, pageHost)
+        val type = resourceType(uri.toString(), accept, isMainFrame)
         val matching = rules.filter { rule ->
-            (rule.includeDomains.isEmpty() || rule.includeDomains.any { hostMatches(pageHost ?: "", it) }) &&
-            rule.excludeDomains.none { hostMatches(pageHost ?: "", it) } &&
-            (rule.resourceTypes.isEmpty() || type in rule.resourceTypes) &&
-            type !in rule.excludedTypes &&
-            (rule.thirdParty == null || rule.thirdParty == thirdParty) &&
-            rule.pattern.containsMatchIn(url)
+            domainApplies(pageHost, rule.includeDomains, rule.excludeDomains) &&
+                (rule.resourceTypes.isEmpty() || type in rule.resourceTypes) &&
+                type !in rule.excludedTypes &&
+                (rule.thirdParty == null || rule.thirdParty == thirdParty) &&
+                rule.pattern.containsMatchIn(url)
         }
         if (matching.any { it.exception }) return false
-        return matching.any { !it.exception }
+        val genericBlockDisabled = pageHost.isNotEmpty() && hasPageException(pageHost, "genericblock")
+        return matching.any { !it.exception && !(genericBlockDisabled && it.generic) }
     }
 
     fun cosmeticCss(pageUrl: String?): String {
         val host = runCatching { Uri.parse(pageUrl ?: "").host?.lowercase(Locale.ROOT) }.getOrNull() ?: return ""
-        val selectors = (genericCosmetic + cosmetic.filterKeys { hostMatches(host, it) }.values.flatten()).distinct()
-        return selectors.filter { it.length < 500 && !it.contains("</style", true) }
-            .joinToString(",") { it }.take(12000)
+        if (hasPageException(host, "elemhide")) return ""
+        val genericHidden = !hasPageException(host, "generichide")
+        val exceptions = cosmeticExceptions.filter { domainApplies(host, it.includeDomains, it.excludeDomains) }
+            .map { it.selector }.toSet()
+        return cosmeticRules.asSequence()
+            .filter { domainApplies(host, it.includeDomains, it.excludeDomains) }
+            .filter { genericHidden || !it.generic }
+            .filter { it.selector !in exceptions }
+            .map { it.selector }.distinct().joinToString(",") { it }.take(12000)
     }
 
-    private fun parse(raw: String): Rule? {
+    private fun hasPageException(host: String, option: String): Boolean =
+        rules.any { it.exception && option in it.exceptionOptions &&
+            domainApplies(host, it.includeDomains, it.excludeDomains) &&
+            it.pattern.containsMatchIn("https://$host/") }
+
+    private fun parseNetworkRule(raw: String): Rule? {
         var line = raw.trim()
-        if (line.isEmpty() || line.startsWith("!") || line.startsWith("[") || line.contains("##") || line.contains("#@#")) return null
+        if (line.isEmpty() || line.startsWith("!") || line.startsWith("[") ||
+            line.contains("##") || line.contains("#@#") || line.contains("#?#") || line.contains("#$#")) return null
         val exception = line.startsWith("@@")
         if (exception) line = line.drop(2)
         val split = line.split('$', limit = 2)
-        var patternText = split[0]
-        val options = split.getOrNull(1)?.split(',') ?: emptyList()
+        val patternText = split[0]
+        val options = split.getOrNull(1)?.split(',')?.map { it.trim() } ?: emptyList()
         val include = mutableSetOf<String>()
         val exclude = mutableSetOf<String>()
         val types = mutableSetOf<String>()
         val excludedTypes = mutableSetOf<String>()
+        val exceptionOptions = mutableSetOf<String>()
         var thirdParty: Boolean? = null
         var matchCase = false
-        options.forEach { rawOpt ->
-            val opt = rawOpt.trim()
+        options.forEach { opt ->
             when {
-                opt.startsWith("domain=") -> opt.removePrefix("domain=").split('|').forEach {
-                    if (it.startsWith("~")) exclude.add(it.drop(1).lowercase(Locale.ROOT))
-                    else include.add(it.lowercase(Locale.ROOT))
+                opt.startsWith("domain=") -> {
+                    val (inc, exc) = parseDomainList(opt.removePrefix("domain=").split('|'))
+                    include.addAll(inc); exclude.addAll(exc)
                 }
                 opt == "third-party" -> thirdParty = true
                 opt == "~third-party" -> thirdParty = false
                 opt == "match-case" -> matchCase = true
+                opt in exceptionOnlyOptions && exception -> exceptionOptions.add(opt)
                 opt.startsWith("~") && opt.drop(1) in knownTypes -> excludedTypes.add(opt.drop(1))
                 opt in knownTypes -> types.add(opt)
+                opt.isNotEmpty() && opt !in ignoredSafeOptions -> return null
             }
         }
         if (patternText.isBlank()) return null
-        val anchoredStart = patternText.startsWith("|")
-        val anchoredEnd = patternText.endsWith("|")
-        if (patternText.startsWith("||")) {
-            patternText = patternText.drop(2)
-            val hostPart = patternText.substringBeforeAny('/', '^', '*', '|')
-            if (hostPart.isBlank()) return null
-            patternText = "^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+\\.)?" + Regex.escape(hostPart) + "(?::[0-9]+)?" + wildcardTail(patternText.removePrefix(hostPart))
-        } else {
-            if (anchoredStart) patternText = patternText.drop(1)
-            if (anchoredEnd) patternText = patternText.dropLast(1)
-            patternText = (if (anchoredStart) "^" else "") + wildcard(patternText) + (if (anchoredEnd) "$" else "")
-        }
+        val generic = include.isEmpty() && exclude.isEmpty()
+        val regexText = toRegex(patternText) ?: return null
         return runCatching {
-            Rule(if (matchCase) Regex(patternText) else Regex(patternText, RegexOption.IGNORE_CASE), exception, include, exclude, types, excludedTypes, thirdParty, matchCase)
+            Rule(Regex(regexText, if (matchCase) setOf() else setOf(RegexOption.IGNORE_CASE)),
+                exception, include, exclude, types, excludedTypes, thirdParty, matchCase, exceptionOptions, generic)
         }.getOrNull()
     }
 
+    private fun toRegex(source: String): String? {
+        var text = source
+        val startAnchor = text.startsWith("|")
+        val endAnchor = text.endsWith("|")
+        if (text.startsWith("||")) {
+            text = text.drop(2)
+            val host = text.substringBeforeAny('/', '^', '*', '|', '?')
+            if (host.isBlank()) return null
+            val tail = text.removePrefix(host)
+            return "^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+\\.)?${Regex.escape(host)}(?::[0-9]+)?${wildcard(tail)}"
+        }
+        if (startAnchor) text = text.drop(1)
+        if (endAnchor) text = text.dropLast(1)
+        return (if (startAnchor) "^" else "") + wildcard(text) + (if (endAnchor) "$" else "")
+    }
+
     private fun wildcard(text: String): String = buildString {
-        var i = 0
-        while (i < text.length) {
-            when (text[i]) {
+        text.forEach { ch ->
+            when (ch) {
                 '*' -> append(".*")
                 '^' -> append("(?:[^a-zA-Z0-9_.%-]|$)")
                 '|' -> append("\\|")
-                else -> append(Regex.escape(text[i].toString()))
+                else -> append(Regex.escape(ch.toString()))
             }
-            i++
         }
     }
 
-    private fun wildcardTail(text: String): String = wildcard(text)
+    private fun resourceType(url: String, accept: String?, main: Boolean): String {
+        if (main) return "document"
+        val a = accept.orEmpty().lowercase(Locale.ROOT)
+        val path = runCatching { Uri.parse(url).path.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
+        return when {
+            a.contains("text/css") || path.endsWith(".css") -> "stylesheet"
+            a.contains("image/") || path.matches(Regex(".*\\.(png|jpe?g|gif|webp|svg|ico|avif)(\\?.*)?$")) -> "image"
+            a.contains("font/") || path.matches(Regex(".*\\.(woff2?|ttf|otf|eot)(\\?.*)?$")) -> "font"
+            a.contains("audio/") || a.contains("video/") || path.matches(Regex(".*\\.(mp3|mp4|webm|ogg|m3u8)(\\?.*)?$")) -> "media"
+            path.endsWith(".js") || path.contains(".js?") -> "script"
+            a.contains("text/html") -> "subdocument"
+            else -> "other"
+        }
+    }
+
+    private fun parseDomainList(values: List<String>): Pair<Set<String>, Set<String>> {
+        val include = mutableSetOf<String>()
+        val exclude = mutableSetOf<String>()
+        values.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }.forEach {
+            if (it.startsWith("~")) exclude.add(it.drop(1)) else include.add(it)
+        }
+        return include to exclude
+    }
+
+    private fun domainApplies(host: String, include: Set<String>, exclude: Set<String>): Boolean {
+        if (host.isBlank()) return include.isEmpty() && exclude.isEmpty()
+        if (exclude.any { hostMatches(host, it) }) return false
+        return include.isEmpty() || include.any { hostMatches(host, it) }
+    }
+
+    private fun sameSite(a: String, b: String): Boolean = hostMatches(a, b) || hostMatches(b, a)
+    private fun hostMatches(host: String, domain: String): Boolean =
+        domain == "*" || host == domain || host.endsWith(".$domain")
+
     private fun String.substringBeforeAny(vararg chars: Char): String {
         val i = indexOfAny(chars)
         return if (i < 0) this else substring(0, i)
     }
-    private fun hostMatches(host: String, domain: String): Boolean =
-        host == domain || host.endsWith(".$domain")
 
     companion object {
-        private val knownTypes = setOf("script", "image", "stylesheet", "font", "media", "xmlhttprequest", "subdocument", "document", "other")
+        private val knownTypes = setOf(
+            "script", "image", "stylesheet", "font", "media", "xmlhttprequest",
+            "subdocument", "document", "other", "object", "ping", "websocket",
+            "webrtc", "popup", "webbundle"
+        )
+        private val exceptionOnlyOptions = setOf("document", "elemhide", "generichide", "genericblock")
+        private val ignoredSafeOptions = setOf("important", "badfilter", "collapse", "sitekey")
     }
 }
