@@ -111,8 +111,7 @@ class FilterEngine(lines: Collection<String>) {
             patternText = patternText.drop(2)
             val hostPart = patternText.substringBeforeAny('/', '^', '*', '|')
             if (hostPart.isBlank()) return null
-            patternText = "^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+\\.)?" + Regex.escape(hostPart) + "(?::[0-9]+)?"
-                + wildcardTail(patternText.removePrefix(hostPart))
+            patternText = "^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+\\.)?" + Regex.escape(hostPart) + "(?::[0-9]+)?" + wildcardTail(patternText.removePrefix(hostPart))
         } else {
             if (anchoredStart) patternText = patternText.drop(1)
             if (anchoredEnd) patternText = patternText.dropLast(1)
