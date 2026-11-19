@@ -149,7 +149,11 @@ class MainActivity : Activity() {
             isSingleLine = true; textSize = 14f; setTextColor(this@MainActivity.foreground); setHintTextColor(Color.GRAY)
             hint = tr("Search or enter website", "Cari atau masukkan situs"); setPadding(dp(12), dp(8), dp(12), dp(8))
             setBackgroundColor(panel); imeOptions = EditorInfo.IME_ACTION_GO
-            setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_GO) { navigate(text.toString()); true } else false }
+            setOnEditorActionListener { _, id, _ ->
+                if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_ACTION_SEARCH || id == EditorInfo.IME_ACTION_DONE) {
+                    navigate(text.toString()); true
+                } else false
+            }
         }
         header.addView(address, LinearLayout.LayoutParams(0, dp(44), 1f))
         header.addView(action("GO") { navigate(address.text.toString()) })
@@ -232,8 +236,15 @@ class MainActivity : Activity() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val requestUri = request?.url ?: return null
                     val host = requestUri.host?.lowercase(Locale.ROOT) ?: return null
-                    // Local VEIL UI must not be evaluated by remote filter lists.
+                    // Never let filter-list false positives cancel top-level navigation.
+                    // This is the most important reliability rule for a browser.
+                    if (request.isForMainFrame) return null
                     if (host == "veil.local" || host == "veil-private.local") return null
+                    // Preserve media, player, and core resources required by YouTube playback.
+                    if (host == "youtube.com" || host.endsWith(".youtube.com") ||
+                        host == "youtu.be" || host.endsWith(".googlevideo.com") ||
+                        host.endsWith(".ytimg.com") || host == "youtubei.googleapis.com" ||
+                        host.endsWith(".youtube-nocookie.com")) return null
                     val jsBlocked = prefs.getString("site_js_" + host, "default") == "block"
                     if (jsBlocked && request.url.path?.endsWith(".js", true) == true) return WebResourceResponse("text/plain", "utf-8", 204, "Blocked by site settings", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     val mode = prefs.getString("block_level", "standard") ?: "standard"
@@ -252,9 +263,17 @@ class MainActivity : Activity() {
                         if (scriptlets.isNotBlank()) view?.evaluateJavascript(scriptlets, null)
                     }
                 }
+                override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                    super.onReceivedError(view, request, error)
+                    if (view === web && request?.isForMainFrame == true) {
+                        status.text = "Page failed • " + (error?.description ?: "Network error")
+                        Toast.makeText(this@MainActivity, "Halaman gagal dimuat. Periksa koneksi atau coba muat ulang.", Toast.LENGTH_LONG).show()
+                    }
+                }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     if (url != null && url.startsWith("http")) recordHistory(url)
+                    if (view === web && url != null && ::address.isInitialized) address.setText(url)
                     if (url != null) {
                         val css = filterEngine().cosmeticCss(url)
                         if (css.isNotBlank()) {
@@ -351,7 +370,15 @@ class MainActivity : Activity() {
             val engine = prefs.getString("search_engine", "https://duckduckgo.com/?q=") ?: "https://duckduckgo.com/?q="
             q = engine + URLEncoder.encode(q, "UTF-8")
         }
-        web.loadUrl(q)
+        runCatching {
+            web.stopLoading()
+            web.loadUrl(q)
+            address.clearFocus()
+            (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                ?.hideSoftInputFromWindow(address.windowToken, 0)
+        }.onFailure {
+            Toast.makeText(this, "Tidak dapat membuka alamat tersebut", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun settings() {
