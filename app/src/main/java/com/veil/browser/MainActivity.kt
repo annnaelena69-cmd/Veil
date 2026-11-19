@@ -230,7 +230,10 @@ class MainActivity : Activity() {
                     return super.shouldInterceptRequest(view, request)
                 }
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                    super.onPageStarted(view, url, favicon); if (view === web) url?.let { address.setText(it) }
+                    super.onPageStarted(view, url, favicon)
+                    if (view === web) url?.let { address.setText(it) }
+                    if (url != null && url.startsWith("http")) {
+                    }
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
