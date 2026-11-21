@@ -82,10 +82,7 @@ class MainActivity : Activity() {
         worker.execute {
             val report = runCatching {
                 val script = """
-                    for root in /sdcard/Android/data /sdcard/Android/obb /sdcard/Android/media /sdcard/Download; do
-                      [ -d \"\$root\" ] || continue
-                      find \"\$root\" -type f \\( -iname '*.sav' -o -iname '*.dat' -o -iname '*.db' -o -iname '*.json' -o -iname '*.bin' -o -iname '*.bak' \\) -print 2>/dev/null
-                    done
+                    find /sdcard/Android/data /sdcard/Android/obb /sdcard/Android/media /sdcard/Download -type f 2>/dev/null | grep -Ei '[.](sav|dat|db|json|bin|bak)$' | head -n 500
                 """.trimIndent()
                 val process = Shizuku.newProcess(arrayOf("sh", "-c", script), null, null)
                 val found = BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
