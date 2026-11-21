@@ -1,16 +1,17 @@
 package dev.veil.scanner
 
 import android.app.Activity
+import android.content.ComponentName
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.IBinder
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import rikka.shizuku.Shizuku
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -20,22 +21,50 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var progress: TextView
     private lateinit var results: TextView
-    private val prefs by lazy { getSharedPreferences("scan_cache_v2", MODE_PRIVATE) }
+    private val prefs by lazy { getSharedPreferences("scan_cache_v3", MODE_PRIVATE) }
+    @Volatile private var scanner: IScannerService? = null
+    @Volatile private var binding = false
+    private lateinit var serviceArgs: Shizuku.UserServiceArgs
 
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-        if (requestCode == REQUEST_CODE) refreshStatus(
-            if (grantResult == PackageManager.PERMISSION_GRANTED) "Permission granted." else "Permission denied. Open Shizuku and grant access."
-        )
+        if (requestCode == REQUEST_CODE) {
+            refreshStatus(if (grantResult == PackageManager.PERMISSION_GRANTED) "Permission granted." else "Permission denied. Open Shizuku Manager, approve Veil, then retry.")
+            if (grantResult == PackageManager.PERMISSION_GRANTED) bindScannerService()
+        }
     }
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
-        runOnUiThread { refreshStatus("Shizuku service connected.") }
+        runOnUiThread {
+            refreshStatus("Shizuku binder received.")
+            if (hasShizukuPermission()) bindScannerService()
+        }
     }
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
-        runOnUiThread { refreshStatus("Shizuku service disconnected. Reopen Shizuku, then reconnect.") }
+        scanner = null
+        binding = false
+        runOnUiThread { refreshStatus("Shizuku stopped. Restart its service and reconnect; cached results remain available.") }
+    }
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            scanner = IScannerService.Stub.asInterface(service)
+            binding = false
+            runOnUiThread {
+                refreshStatus(if (scanner != null) "Scanner service connected and ready." else "Scanner service returned an invalid binder.")
+            }
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            scanner = null
+            binding = false
+            runOnUiThread { refreshStatus("Scanner service disconnected. Tap Connect / retry.") }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        serviceArgs = Shizuku.UserServiceArgs(ComponentName(this, ScannerUserService::class.java))
+            .tag("veil-save-scanner")
+            .version(1)
+            .daemon(false)
+
         Shizuku.addRequestPermissionResultListener(permissionListener)
         Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
@@ -77,38 +106,56 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (::status.isInitialized) refreshStatus()
+        if (::status.isInitialized) {
+            refreshStatus()
+            if (hasShizukuPermission()) bindScannerService()
+        }
     }
+
+    private fun hasShizukuPermission(): Boolean =
+        runCatching { Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false)
 
     private fun refreshStatus(note: String? = null) {
         if (!::status.isInitialized) return
         val message = when {
             !runCatching { Shizuku.pingBinder() }.getOrDefault(false) ->
-                "Shizuku: disconnected / not running. Start Shizuku, then return here."
-            runCatching { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false) ->
-                "Shizuku: connected · permission granted · ready"
-            else -> "Shizuku: connected · permission not granted"
+                "Shizuku: disconnected / not running. Start Shizuku first."
+            !hasShizukuPermission() -> "Shizuku: connected · permission not granted"
+            scanner != null -> "Shizuku: connected · permission granted · scanner ready"
+            binding -> "Shizuku: permission granted · connecting scanner service…"
+            else -> "Shizuku: connected · permission granted · scanner not bound"
         }
         status.text = if (note.isNullOrBlank()) message else "$message\n$note"
     }
 
     private fun requestShizuku() {
         if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
-            refreshStatus("Start the Shizuku service first. Wireless debugging/ADB setup may be required.")
+            refreshStatus("Recovery: start Shizuku using Wireless debugging or ADB, then return here.")
             return
         }
         try {
-            when (Shizuku.checkSelfPermission()) {
-                PackageManager.PERMISSION_GRANTED -> refreshStatus("Access is already granted.")
-                else -> if (Shizuku.shouldShowRequestPermissionRationale()) {
-                    refreshStatus("Open Shizuku Manager and approve Veil, then tap Check again.")
-                    Shizuku.requestPermission(REQUEST_CODE)
-                } else {
-                    Shizuku.requestPermission(REQUEST_CODE)
-                }
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                refreshStatus("Access already granted. Connecting scanner service…")
+                bindScannerService()
+            } else {
+                Shizuku.requestPermission(REQUEST_CODE)
             }
         } catch (e: Throwable) {
-            refreshStatus("Permission check failed: ${e.message ?: e.javaClass.simpleName}")
+            refreshStatus("Permission check failed: ${e.message ?: e.javaClass.simpleName}. Reopen Shizuku Manager and retry.")
+        }
+    }
+
+    @Synchronized
+    private fun bindScannerService() {
+        if (scanner != null || binding || !hasShizukuPermission()) return
+        try {
+            binding = true
+            Shizuku.bindUserService(serviceArgs, serviceConnection)
+            refreshStatus("Binding Shizuku scanner service…")
+        } catch (e: Throwable) {
+            binding = false
+            scanner = null
+            refreshStatus("Service bind failed: ${e.message ?: e.javaClass.simpleName}. Restart Shizuku and retry.")
         }
     }
 
@@ -116,7 +163,7 @@ class MainActivity : Activity() {
         val cached = prefs.getStringSet(KEY_CACHE, emptySet()).orEmpty().toList().sorted()
         if (cached.isNotEmpty()) {
             results.text = cached.joinToString("\n")
-            progress.text = "Cached results: ${cached.size}. Starting a fresh scan updates this list."
+            progress.text = "Cached results: ${cached.size}. Cache remains visible while a fresh scan runs."
         } else {
             progress.text = "No cached scan yet."
         }
@@ -127,81 +174,62 @@ class MainActivity : Activity() {
             progress.text = "A scan is already running."
             return
         }
-        if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false) ||
-            runCatching { Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED }.getOrDefault(true)) {
-            refreshStatus("Scanning blocked: connect Shizuku and grant Veil permission.")
+        if (!hasShizukuPermission()) {
+            refreshStatus("Scan blocked. Connect Shizuku and grant permission first.")
             return
         }
+        val remote = scanner
+        if (remote == null) {
+            bindScannerService()
+            refreshStatus("Scanner is still connecting. Wait for 'scanner ready', then tap Scan again.")
+            return
+        }
+
         scanning.set(true)
-        progress.text = "Scanning in stages… cached results remain visible until new results arrive."
+        progress.text = "Scanning in stages… previous cache remains visible."
         worker.execute {
             val found = linkedSetOf<String>()
             val failures = mutableListOf<String>()
-            var completedRoots = 0
+            val roots = listOf(
+                "/sdcard/Android/data", "/sdcard/Android/obb", "/sdcard/Android/media",
+                "/sdcard/Download", "/sdcard/Documents", "/sdcard/Games",
+                "/sdcard/Saves", "/sdcard/Android"
+            )
             try {
-                val roots = listOf(
-                    "/sdcard/Android/data", "/sdcard/Android/obb", "/sdcard/Android/media",
-                    "/sdcard/Download", "/sdcard/Documents", "/sdcard/Games", "/sdcard/Saves"
-                )
-                for (root in roots) {
-                    if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
-                        failures += "Shizuku disconnected during scan."
+                for ((index, root) in roots.withIndex()) {
+                    if (!hasShizukuPermission()) {
+                        failures += "Shizuku disconnected or permission lost during scan. Reconnect and retry."
                         break
                     }
-                    val script = """
-                        root='$root'
-                        if [ -d "$root" ] && [ -r "$root" ]; then
-                          find "$root" -type f \(
-                            -iname '*.sav' -o -iname '*.save' -o -iname '*.dat' -o
-                            -iname '*.db' -o -iname '*.sqlite' -o -iname '*.json' -o
-                            -iname '*.bin' -o -iname '*.bak' -o -iname '*.backup' -o
-                            -iname '*.profile' -o -iname '*.cfg' -o -iname '*.xml' -o
-                            -iname 'save*' -o -iname 'profile*'
-                          \) -print 2>/dev/null
-                        else
-                          echo "__VEIL_ROOT_DENIED__:$root"
-                        fi
-                    """.trimIndent()
                     try {
-                        val process = Shizuku.newProcess(arrayOf("sh", "-c", script), null, null)
-                        BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-                            while (true) {
-                                val line = reader.readLine() ?: break
-                                if (line.startsWith("__VEIL_ROOT_DENIED__:")) {
-                                    failures += "No access: ${line.substringAfter(':')}"
-                                } else if (line.isNotBlank()) {
-                                    found += line
-                                    if (found.size % BATCH_SIZE == 0) {
-                                        val snapshot = found.toList()
-                                        runOnUiThread {
-                                            progress.text = "Scanning… $completedRoots/${roots.size} locations · ${snapshot.size} candidates"
-                                            results.text = snapshot.joinToString("\n")
-                                        }
-                                    }
-                                    if (found.size >= MAX_RESULTS) break
-                                }
-                            }
+                        val response = remote.scan(root)
+                        if (response.startsWith("VEIL_ERROR:")) {
+                            failures += response.removePrefix("VEIL_ERROR:")
+                        } else {
+                            response.lineSequence().filter { it.isNotBlank() }.forEach { found.add(it) }
                         }
-                        val exitCode = process.waitFor()
-                        if (exitCode != 0) failures += "Search command at $root returned exit code $exitCode."
                     } catch (e: Throwable) {
-                        failures += "$root: ${e.message ?: e.javaClass.simpleName}"
+                        failures += "$root: ${e.message ?: e.javaClass.simpleName}. Reconnect Shizuku and rescan this location."
                     }
-                    completedRoots++
                     val snapshot = found.toList()
                     runOnUiThread {
-                        progress.text = "Scanned $completedRoots/${roots.size} locations · ${snapshot.size} candidates"
-                        results.text = snapshot.joinToString("\n")
+                        progress.text = "Scanned ${index + 1}/${roots.size} locations · ${snapshot.size} candidates"
+                        results.text = snapshot.joinToString("\n").ifBlank { "No matching files yet." }
                     }
                     if (found.size >= MAX_RESULTS) break
                 }
-                prefs.edit().putStringSet(KEY_CACHE, HashSet(found)).putLong(KEY_CACHE_TIME, System.currentTimeMillis()).apply()
+
+                if (found.isNotEmpty()) {
+                    prefs.edit()
+                        .putStringSet(KEY_CACHE, HashSet(found.take(MAX_RESULTS)))
+                        .putLong(KEY_CACHE_TIME, System.currentTimeMillis())
+                        .apply()
+                }
                 val summary = buildString {
                     append("Finished: ${found.size} candidate files. ")
-                    append(if (found.size >= MAX_RESULTS) "Result cap reached. " else "")
-                    append("Accessible roots: $completedRoots.")
-                    if (failures.isNotEmpty()) append("\nWarnings / recovery details:\n" + failures.distinct().joinToString("\n"))
-                    if (found.isEmpty()) append("\nNo matches found. Try granting Shizuku permission or use the Android folder picker in a future access mode.")
+                    append("Locations checked: ${roots.size}.")
+                    if (failures.isNotEmpty()) append("\nAccess / recovery report:\n" + failures.distinct().joinToString("\n"))
+                    if (found.isEmpty()) append("\nNo matches. Check that the game has created save files and that Shizuku is running with permission.")
                 }
                 runOnUiThread {
                     progress.text = summary
@@ -210,7 +238,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Throwable) {
                 runOnUiThread {
-                    progress.text = "Scan error: ${e.message ?: e.javaClass.simpleName}. Cached results were preserved."
+                    progress.text = "Scan failed: ${e.message ?: e.javaClass.simpleName}. Previous cache was preserved. Reconnect Shizuku and retry."
                     refreshStatus()
                 }
             } finally {
@@ -220,6 +248,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        runCatching { Shizuku.unbindUserService(serviceArgs, serviceConnection, true) }
         Shizuku.removeRequestPermissionResultListener(permissionListener)
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
@@ -230,7 +259,6 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_CODE = 4107
         private const val MAX_RESULTS = 3000
-        private const val BATCH_SIZE = 40
         private const val KEY_CACHE = "paths"
         private const val KEY_CACHE_TIME = "updated_at"
     }
