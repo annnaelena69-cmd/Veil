@@ -6,12 +6,15 @@ plugins {
 android {
     namespace = "dev.veil.scanner"
     compileSdk = 36
+    buildFeatures {
+        aidl = true
+    }
     defaultConfig {
         applicationId = "dev.veil.scanner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -22,4 +25,5 @@ android {
 
 dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }
